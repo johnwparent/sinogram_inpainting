@@ -1,1 +1,1 @@
-# clarkson_3d_head_recon
+# sinogram_inpainting
