@@ -1,17 +1,24 @@
+# Sources:
+# https://github.com/astra-toolbox/astra-toolbox/blob/3cdfbe01f4f0dc1eb2df5224f10dd53d7804a642/samples/python/s004_cpu_reconstruction.py
+
+
 import argparse
 import glob
-from itk.support.types import PixelTypes
 import skimage.transform
-import sklearn
-import monai
 import itk
 import shutil
 import numpy as np
 import util
 
+import monai
+import itk
+import astra
+import numpy as np
+import matplotlib.pyplot as plt
 
 from monai.data import partition_dataset
 from pathlib import Path
+
 
 # Any and all data goes here
 DATA_DIR = Path("data")
@@ -83,6 +90,31 @@ def _construct_parser():
     sub_parsers.add_parser("extract_synthetic_data")
 
     return my_parser
+
+def forward_project(img, det_spacing, radius, thetas=np.linspace(0, np.pi, 180, False)):
+    arr = itk.array_from_image(img).squeeze(0)
+
+    if arr.shape[0] != arr.shape[1]:
+        raise ValueError("img argument must be a square image. Got {} rows and {} cols".format(arr.shape[0], arr.shape[1]))
+
+    # Create the vol geometry
+    vol_geom = astra.create_vol_geom(arr.shape[0], arr.shape[1])
+
+    # Create the proj geometry
+    proj_geom = astra.create_proj_geom("fanflat", det_spacing, arr.shape[0], thetas, radius, radius)
+
+    # Create the projector
+    proj_id = astra.create_projector("line_fanflat", proj_geom, vol_geom)
+
+    # Get the sinogram
+    sino_id, sino = astra.create_sino(arr, proj_id)
+
+    plt.imshow(sino.T); plt.show()
+
+    astra.projector.delete(proj_id)
+    astra.projector.delete(sino_id)
+
+    return sino
 
 
 def _extract_datalist(dl, xoutdir, youtdir):
