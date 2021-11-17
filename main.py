@@ -15,6 +15,8 @@ import itk
 import astra
 import numpy as np
 import matplotlib.pyplot as plt
+import segmentation_models_pytorch as smp
+
 
 from monai.data import partition_dataset
 from pathlib import Path
@@ -74,6 +76,10 @@ SourceImageType = itk.Image[PixelType, SourceDataDim]
 ImageType = itk.Image[PixelType, ExtractedDataDim]
 
 NETWORK_INPUT_SIZE = (256, 256)
+# Some other constants
+
+# Default number of epochs
+NUM_EPOCHS = 10
 
 
 def _construct_parser():
@@ -242,6 +248,13 @@ def extract_data(
     _extract_datalist(train_part, TRAIN_X_DIR, TRAIN_Y_DIR)
     _extract_datalist(val_part, VAL_X_DIR, VAL_Y_DIR)
     _extract_datalist(test_part, TEST_X_DIR, TEST_Y_DIR)
+
+# TODO: Weird that we have the "classes" keyword below.
+# This is only meant to be a proof of concept.
+def get_model():
+    return smp.Unet(
+        encoder_weights="imagenet", in_channels=1, classes=1, activation=None
+    )
 
 
 def main():
