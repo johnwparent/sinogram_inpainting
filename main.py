@@ -188,6 +188,11 @@ def _construct_parser():
     sub_parsers.add_parser("train", help="Train a fresh model")
 
 
+    sub_parser_predict_and_display = sub_parsers.add_parser("predict_and_display")
+    group = sub_parser_predict_and_display.add_mutually_exclusive_group(required=True)
+    group.add_argument('--random', action='store_true')
+    group.add_argument('--image_path', action='store')
+
     return my_parser
 
 
@@ -371,31 +376,22 @@ def _display_image_truth_and_prediction(image=None, truth=None, prediction=None)
     plt.show()
 
 
-# def predict_image_and_show(
-#     model,
-#     image_full_path,
-#     device,
-#     gt_full_path=None,
-#     eval_metric=monai.metrics.MSEMetric(),
-# ):
+def predict_image_and_show(
+    model,
+    image,
+    device,
+    gt=None,
+    eval_metric=monai.metrics.MSEMetric(),
+):
+    # TODO: three return values? Get rid of last one? Doing lots of converting
+    raw_output = model(image)
 
-#     image = itk.imread(image_full_path)
-#     gt = None if gt_full_path is None else itk.imread(gt_full_path)
+    prediction = raw_output.unsqueeze(0)
+    if gt is not None:
+        print("Evaluation metric:", eval_metric(prediction, gt))
 
-#     # TODO: three return values? Get rid of last one? Doing lots of converting
-#     prediction = model(some_transform(image))
-
-#     # Unsqueeze for batch. Only need to do this for eval_metric
-#     # TODO: transformations for prediction
-#     predicted_mask_eval = output_to_3d_mask_transformsed(raw_output).unsqueeze(0)
-#     if gt_full_path is not None:
-#         mask_eval = eval_mask_transforms(gt_full_path).unsqueeze(0)
-#         # TODO: move this to label
-#         print("Dice scores:", eval_metric(predicted_mask_eval, mask_eval))
-#     print("predicted_onsd:", predicted_onsd)
-
-#     # Display
-#     _display_image_truth_and_prediction(image, mask, predicted_mask)
+    # Display
+    _display_image_truth_and_prediction(image, gt, prediction)
 
 
 
@@ -535,6 +531,21 @@ def main():
         )
         val_losses = train_model(model, train_loader, val_loader, device)
         print(val_losses)
+
+
+    if args.sub_command == "predict_and_show":
+        model = get_model()
+        image, gt = None, None
+        if args.random_image:
+            image, gt = get_random_image_and_gt(TEST_X_DIR)
+
+        elif args.image_path:
+            image = itk.imread(args.image_path)
+
+            if args.gt_path:
+                gt = itk.imread(args.gt_path)
+
+        predict_image_and_show(model, image, device, gt)
 
 
 if __name__ == "__main__":
