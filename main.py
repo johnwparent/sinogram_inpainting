@@ -224,7 +224,7 @@ def main():
 
     elif args.sub_command == "extract_synthetic_data":
         extract_data(
-            SYNTHETIC_SINO_DIR, SYNTHETIC_INCOMPLETE_SINO_DIR
+            SYNTHETIC_INCOMPLETE_SINO_DIR, SYNTHETIC_SINO_DIR
         )
 
 
