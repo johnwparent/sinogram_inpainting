@@ -102,7 +102,7 @@ NETWORK_INPUT_SIZE = (256, 256)
 # Some other constants
 
 # Default number of epochs
-NUM_EPOCHS = 1
+NUM_EPOCHS = 10
 
 BATCH_SIZE = 16
 
@@ -125,32 +125,29 @@ train_x_transforms = Compose(
     [
         LoadImage(image_only=True),
         EnsureType(),
-        SqueezeDim(2),
         AddChannel(),
         Resize(NETWORK_INPUT_SIZE),
         # Resize(NETWORK_INPUT_SHAPE, mode="nearest"),
         # # RandZoom(prob=0.5, min_zoom=0.9, max_zoom=1.3, mode="nearest"), # TODO: Make sure we dont center zoom at cut out the top. Uncomment
         # ScaleIntensity(),
-        # RandFlip(prob=0.5, spatial_axis=1),
+        RandFlip(prob=0.5, spatial_axis=1),
     ]
 )
 train_y_transforms = Compose(
     [
         LoadImage(image_only=True),
         EnsureType(),
-        SqueezeDim(2),
         AddChannel(),
-        Resize(NETWORK_INPUT_SIZE)
+        Resize(NETWORK_INPUT_SIZE),
         # Resize(NETWORK_INPUT_SHAPE, mode="nearest"),
         # # RandZoom(prob=0.5, min_zoom=0.9, max_zoom=1.3, mode="nearest"), # TODO: Make sure we dont center zoom at cut out the top. Uncomment
-        # RandFlip(prob=0.5, spatial_axis=1),
+        RandFlip(prob=0.5, spatial_axis=1),
     ]
 )
 val_x_transforms = Compose(
     [
         LoadImage(image_only=True),
         EnsureType(),
-        SqueezeDim(2),
         AddChannel(),
         Resize(NETWORK_INPUT_SIZE)
         # Resize(NETWORK_INPUT_SHAPE, mode="nearest"),
@@ -163,12 +160,22 @@ val_y_transforms = Compose(
     [
         LoadImage(image_only=True),
         EnsureType(),
-        SqueezeDim(2),
         AddChannel(),
         Resize(NETWORK_INPUT_SIZE)
         # Resize(NETWORK_INPUT_SHAPE, mode="nearest"),
         # EnsureType(),
         # AsDiscrete(to_onehot=True, n_classes=3),
+    ]
+)
+
+itk_image_to_model_input = Compose(
+    [
+        EnsureType(),
+        AddChannel(),
+        Resize(NETWORK_INPUT_SIZE, mode="nearest"),
+        # ScaleIntensity(),
+        AddChannel(),
+        EnsureType(),
     ]
 )
 
@@ -188,10 +195,12 @@ def _construct_parser():
     sub_parsers.add_parser("train", help="Train a fresh model")
 
 
-    sub_parser_predict_and_display = sub_parsers.add_parser("predict_and_display")
-    group = sub_parser_predict_and_display.add_mutually_exclusive_group(required=True)
-    group.add_argument('--random', action='store_true')
-    group.add_argument('--image_path', action='store')
+    sub_parser_predict_and_show = sub_parsers.add_parser("predict_and_show")
+    # TODO: Do mutual exclusion properly here
+    # group = sub_parser_predict_and_show.add_mutually_exclusive_group(required=True)
+    sub_parser_predict_and_show.add_argument('--random_image', action='store_true')
+    sub_parser_predict_and_show.add_argument('--image_path', action='store')
+    sub_parser_predict_and_show.add_argument('--gt_path', action='store')
 
     return my_parser
 
@@ -335,7 +344,7 @@ def get_data_loader(
     ys = sorted(glob.glob(str(ydir / "*")))
 
     # Should have the same filenames in both
-    assert xs == ys
+    assert [Path(p).name for p in xs] == [Path(p).name for p in ys]
 
     dataset = ArrayDataset(xs, xtransforms, ys, ytransforms)
     return DataLoader(
@@ -361,7 +370,7 @@ def _display_image_truth_and_prediction(image=None, truth=None, prediction=None)
         # Display the truth
         sp2 = fig.add_subplot(1, num_ims_to_display, curr_image_num)
         sp2.set_title("Ground Truth")
-        plt.imshow(truth, cmap="gray", vmin=0, vmax=2)
+        plt.imshow(truth)
 
         curr_image_num += 1
 
@@ -369,12 +378,35 @@ def _display_image_truth_and_prediction(image=None, truth=None, prediction=None)
         # Display the corresponding mask patch
         sp3 = fig.add_subplot(1, num_ims_to_display, curr_image_num)
         sp3.set_title("Prediction")
-        plt.imshow(prediction, cmap="gray", vmin=0, vmax=2)
+        plt.imshow(prediction)
 
         curr_image_num += 1
 
     plt.show()
 
+
+def run_inference(model, input_image, device):
+    model.eval()
+    model.to(device)
+
+    # Generate predictions
+    with torch.no_grad():
+        prediction = (
+            model(itk_image_to_model_input(input_image).to(device)).cpu().squeeze(0)
+        )
+
+    w, h = itk.size(input_image)
+    transform = Compose(
+        [
+            AddChannel(),
+            Resize((h, w), mode="nearest"),
+        ]
+    )
+
+    prediction = transform(prediction.squeeze(0)).squeeze(0)
+    prediction_image = util.image_from_array(prediction, reference_image=input_image)
+
+    return prediction_image
 
 def predict_image_and_show(
     model,
@@ -383,12 +415,10 @@ def predict_image_and_show(
     gt=None,
     eval_metric=monai.metrics.MSEMetric(),
 ):
-    # TODO: three return values? Get rid of last one? Doing lots of converting
-    raw_output = model(image)
 
-    prediction = raw_output.unsqueeze(0)
-    if gt is not None:
-        print("Evaluation metric:", eval_metric(prediction, gt))
+    prediction = run_inference(model, image, device)
+    # if gt is not None: TODO: Get metric displaying working
+    #     print("Evaluation metric:", eval_metric(prediction.unsqueeze(), gt.unsqueeze()))
 
     # Display
     _display_image_truth_and_prediction(image, gt, prediction)
@@ -424,20 +454,21 @@ def train_model(
             labels.append(d["label"])
         return preds, labels
 
-    def prepare_batch_train(batchdata, device, non_blocking):
+
+    def prepare_batch(batchdata, device, non_blocking):
         imgs, masks = batchdata
         return imgs.to(device), masks.to(device)
 
-    def prepare_batch_val(batchdata, device, non_blocking):
-        imgs, masks = batchdata
-        return imgs.to(device), masks.to(device)
-
+    # TODO: Something weird might be going on with checkpoint saving
+    # Also check that
+    # MSE is behaving correctly since errors are so bad. Activations?
     key_val_metric = {"MSE": MeanAbsoluteError(output_transform=trans_batch_val)}
     MODEL_SAVE_DIR.mkdir(parents=True, exist_ok=True)
     checkpoint_saver = CheckpointSaver(
         save_dir=MODEL_SAVE_DIR,
         save_dict={"model": model},
         save_key_metric=True,
+        key_metric_negative_sign=True,
         key_metric_filename=BEST_MODEL_NAME,
     )
 
@@ -446,7 +477,7 @@ def train_model(
         val_data_loader=val_loader,
         network=model,
         key_val_metric=key_val_metric,
-        prepare_batch=prepare_batch_val,
+        prepare_batch=prepare_batch,
         val_handlers=[checkpoint_saver],
     )
 
@@ -458,7 +489,7 @@ def train_model(
         optimizer=optimizer,
         loss_function=loss_function,
         train_handlers=[ValidationHandler(1, evaluator)],
-        prepare_batch=prepare_batch_train,
+        prepare_batch=prepare_batch,
     )
 
     @trainer.on(Events.ITERATION_COMPLETED)
@@ -495,6 +526,23 @@ def train_model(
     return metric_values
 
 
+def get_random_image_and_gt(image_dir, gt_dir):
+    if isinstance(image_dir, str):
+        image_dir = Path(image_dir)
+
+    if isinstance(gt_dir, str):
+        gt_dir = Path(gt_dir)
+
+    fpaths = list(image_dir.glob("*.*"))
+    random_im_path = np.random.choice(fpaths, size=1)[0]
+    random_im_path = Path(random_im_path)
+    image_fname = random_im_path.name
+
+    # Assuming image and gt fnames are the same, just in different dirs
+    gt_path = str(gt_dir / image_fname)
+
+    return itk.imread(str(random_im_path)), itk.imread(gt_path)
+
 def main():
     my_parser = _construct_parser()
     args = my_parser.parse_args()
@@ -510,22 +558,36 @@ def main():
             SYNTHETIC_INCOMPLETE_SINO_DIR, SYNTHETIC_SINO_DIR
         )
 
-
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if device == "cuda":
         torch.cuda.empty_cache()
+
+    if args.sub_command == "predict_and_show":
+        model = get_model()
+        image, gt = None, None
+        if args.random_image:
+            image, gt = get_random_image_and_gt(TEST_X_DIR, TEST_Y_DIR)
+
+        elif args.image_path and args.gt_path:
+            image = itk.imread(args.image_path)
+            gt = itk.imread(args.gt_path)
+
+        else:
+            raise RuntimeError("Please specify either --random_image or --image_path and --gt_path")
+
+        predict_image_and_show(model, image, device, gt)
 
     if args.sub_command == "train":
         model = get_model()
         train_loader = get_data_loader(
             TRAIN_X_DIR,
-            TRAIN_X_DIR,
+            TRAIN_Y_DIR,
             xtransforms=train_x_transforms,
             ytransforms=train_y_transforms,
         )
         val_loader = get_data_loader(
-            TRAIN_X_DIR,
-            TRAIN_X_DIR,
+            VAL_X_DIR,
+            VAL_Y_DIR,
             xtransforms=val_x_transforms,
             ytransforms=val_y_transforms,
         )
@@ -533,19 +595,6 @@ def main():
         print(val_losses)
 
 
-    if args.sub_command == "predict_and_show":
-        model = get_model()
-        image, gt = None, None
-        if args.random_image:
-            image, gt = get_random_image_and_gt(TEST_X_DIR)
-
-        elif args.image_path:
-            image = itk.imread(args.image_path)
-
-            if args.gt_path:
-                gt = itk.imread(args.gt_path)
-
-        predict_image_and_show(model, image, device, gt)
 
 
 if __name__ == "__main__":
