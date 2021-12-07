@@ -24,7 +24,7 @@ from ignite.engine import Events
 from monai.data import partition_dataset
 from pathlib import Path
 from monai.engines import SupervisedTrainer, SupervisedEvaluator
-from monai.handlers import ValidationHandler, CheckpointSaver, MeanAbsoluteError
+from monai.handlers import ValidationHandler, CheckpointSaver, MeanAbsoluteError, MeanSquaredError
 from torch import optim, nn
 from monai.data import ArrayDataset, DataLoader
 from monai.transforms import (
@@ -108,6 +108,7 @@ BATCH_SIZE = 16
 
 BEST_MODEL_NAME = "best_model.pt"
 MODEL_SAVE_DIR = Path("./models")
+BEST_MODEL_PATH = MODEL_SAVE_DIR / BEST_MODEL_NAME
 
 # ITK stuff
 PixelType = itk.F
@@ -129,7 +130,7 @@ train_x_transforms = Compose(
         Resize(NETWORK_INPUT_SIZE),
         # Resize(NETWORK_INPUT_SHAPE, mode="nearest"),
         # # RandZoom(prob=0.5, min_zoom=0.9, max_zoom=1.3, mode="nearest"), # TODO: Make sure we dont center zoom at cut out the top. Uncomment
-        # ScaleIntensity(),
+        ScaleIntensity(),
         RandFlip(prob=0.5, spatial_axis=1),
     ]
 )
@@ -141,6 +142,7 @@ train_y_transforms = Compose(
         Resize(NETWORK_INPUT_SIZE),
         # Resize(NETWORK_INPUT_SHAPE, mode="nearest"),
         # # RandZoom(prob=0.5, min_zoom=0.9, max_zoom=1.3, mode="nearest"), # TODO: Make sure we dont center zoom at cut out the top. Uncomment
+        ScaleIntensity(),
         RandFlip(prob=0.5, spatial_axis=1),
     ]
 )
@@ -149,9 +151,9 @@ val_x_transforms = Compose(
         LoadImage(image_only=True),
         EnsureType(),
         AddChannel(),
-        Resize(NETWORK_INPUT_SIZE)
+        Resize(NETWORK_INPUT_SIZE),
         # Resize(NETWORK_INPUT_SHAPE, mode="nearest"),
-        # ScaleIntensity(),
+        ScaleIntensity(),
         # EnsureType(),
     ]
 )
@@ -161,7 +163,8 @@ val_y_transforms = Compose(
         LoadImage(image_only=True),
         EnsureType(),
         AddChannel(),
-        Resize(NETWORK_INPUT_SIZE)
+        Resize(NETWORK_INPUT_SIZE),
+        ScaleIntensity(),
         # Resize(NETWORK_INPUT_SHAPE, mode="nearest"),
         # EnsureType(),
         # AsDiscrete(to_onehot=True, n_classes=3),
@@ -173,7 +176,7 @@ itk_image_to_model_input = Compose(
         EnsureType(),
         AddChannel(),
         Resize(NETWORK_INPUT_SIZE, mode="nearest"),
-        # ScaleIntensity(),
+        ScaleIntensity(),
         AddChannel(),
         EnsureType(),
     ]
@@ -417,8 +420,11 @@ def predict_image_and_show(
 ):
 
     prediction = run_inference(model, image, device)
-    # if gt is not None: TODO: Get metric displaying working
-    #     print("Evaluation metric:", eval_metric(prediction.unsqueeze(), gt.unsqueeze()))
+    if gt is not None:
+        # TODO: get the evaluation metric printing out the correct result here. Need to include scaling.
+        prediction_arr = torch.Tensor(itk.array_from_image(prediction)).unsqueeze(0)
+        gt_arr = torch.Tensor(itk.array_from_image(gt)).unsqueeze(0)
+        print("Evaluation metric:", eval_metric(prediction_arr, gt_arr))
 
     # Display
     _display_image_truth_and_prediction(image, gt, prediction)
@@ -459,10 +465,7 @@ def train_model(
         imgs, masks = batchdata
         return imgs.to(device), masks.to(device)
 
-    # TODO: Something weird might be going on with checkpoint saving
-    # Also check that
-    # MSE is behaving correctly since errors are so bad. Activations?
-    key_val_metric = {"MSE": MeanAbsoluteError(output_transform=trans_batch_val)}
+    key_val_metric = {"MSE": MeanSquaredError(output_transform=trans_batch_val)}
     MODEL_SAVE_DIR.mkdir(parents=True, exist_ok=True)
     checkpoint_saver = CheckpointSaver(
         save_dir=MODEL_SAVE_DIR,
@@ -543,6 +546,13 @@ def get_random_image_and_gt(image_dir, gt_dir):
 
     return itk.imread(str(random_im_path)), itk.imread(gt_path)
 
+
+def load_model(path=BEST_MODEL_PATH):
+    model = get_model()
+    model.load_state_dict(torch.load(str(path)))
+    return model
+
+
 def main():
     my_parser = _construct_parser()
     args = my_parser.parse_args()
@@ -563,10 +573,10 @@ def main():
         torch.cuda.empty_cache()
 
     if args.sub_command == "predict_and_show":
-        model = get_model()
+        model = load_model()
         image, gt = None, None
         if args.random_image:
-            image, gt = get_random_image_and_gt(TEST_X_DIR, TEST_Y_DIR)
+            image, gt = get_random_image_and_gt(TRAIN_X_DIR, TRAIN_Y_DIR)
 
         elif args.image_path and args.gt_path:
             image = itk.imread(args.image_path)
