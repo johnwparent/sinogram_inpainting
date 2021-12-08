@@ -20,6 +20,7 @@ import segmentation_models_pytorch as smp
 import shutil
 
 
+from mpl_toolkits.axes_grid1 import ImageGrid
 from ignite.engine import Events
 from monai.data import partition_dataset
 from pathlib import Path
@@ -102,7 +103,7 @@ NETWORK_INPUT_SIZE = (256, 256)
 # Some other constants
 
 # Default number of epochs
-NUM_EPOCHS = 10
+NUM_EPOCHS = 200
 
 BATCH_SIZE = 16
 
@@ -173,7 +174,7 @@ val_y_transforms = Compose(
 
 itk_image_to_model_input = Compose(
     [
-        EnsureType(),
+        EnsureType(data_type="tensor"),
         AddChannel(),
         Resize(NETWORK_INPUT_SIZE, mode="nearest"),
         ScaleIntensity(),
@@ -201,6 +202,7 @@ def _construct_parser():
     sub_parser_predict_and_show = sub_parsers.add_parser("predict_and_show")
     # TODO: Do mutual exclusion properly here
     # group = sub_parser_predict_and_show.add_mutually_exclusive_group(required=True)
+    sub_parser_predict_and_show.add_argument('--show_iradon', action='store_true', help="Run each of the images through iradon")
     sub_parser_predict_and_show.add_argument('--random_image', action='store_true')
     sub_parser_predict_and_show.add_argument('--image_path', action='store')
     sub_parser_predict_and_show.add_argument('--gt_path', action='store')
@@ -276,7 +278,7 @@ def extract_data(
     _extract_datalist(test_part, TEST_X_DIR, TEST_Y_DIR)
 
 
-def convert_to_sinogram(im: itk.Image, theta=None):
+def forward_project_radon(im: itk.Image, theta=None):
     im_size = im.GetLargestPossibleRegion().GetSize()
     if len(im_size) == 3:
         if im_size[2] != 1:
@@ -293,6 +295,19 @@ def convert_to_sinogram(im: itk.Image, theta=None):
 
     sino_arr = skimage.transform.radon(im, theta=theta, circle=False)
     return itk.image_from_array(sino_arr)
+
+def back_project_iradon(im, theta=None):
+    '''
+    Back projects using iradon. Note that the reconstructed image does not have
+    meaningful spacing, direction, etc. and should be used for displaying ONLY.
+    '''
+
+    if isinstance(im, itk.Image):
+        im = itk.array_from_image(im)
+
+    rec_im_arr = skimage.transform.iradon(im, theta, circle=False)
+    return rec_im_arr.astype(np.float32)
+    # return itk.image_from_array(rec_im_arr.astype(np.float32))
 
 
 def generate_synthetic_data(
@@ -322,7 +337,7 @@ def generate_synthetic_data(
             print("On image {} of {}".format(i, len(paths)))
 
         source_im = itk.imread(path, pixel_type=PixelType)
-        complete_sino = convert_to_sinogram(source_im)
+        complete_sino = forward_project_radon(source_im)
         incomplete_sino = remove_random_cols_of_image(complete_sino)
 
         # Now write to disk
@@ -355,37 +370,39 @@ def get_data_loader(
     )
 
 
-def _display_image_truth_and_prediction(image=None, truth=None, prediction=None):
-    num_ims_to_display = 3 - ((image is None) + (truth is None) + (prediction is None))
-    curr_image_num = 1
-
+def _display_images_in_grid(images, grid_shape, titles=None):
     fig = plt.figure(figsize=(10, 10))
+    grid = ImageGrid(fig, 111, nrows_ncols=grid_shape, axes_pad=0.3)
 
-    if image is not None:
-        # Display the image
-        sp1 = fig.add_subplot(1, num_ims_to_display, curr_image_num)
-        sp1.set_title("Image")
-        plt.imshow(image)
-
-        curr_image_num += 1
-
-    if truth is not None:
-        # Display the truth
-        sp2 = fig.add_subplot(1, num_ims_to_display, curr_image_num)
-        sp2.set_title("Ground Truth")
-        plt.imshow(truth)
-
-        curr_image_num += 1
-
-    if prediction is not None:
-        # Display the corresponding mask patch
-        sp3 = fig.add_subplot(1, num_ims_to_display, curr_image_num)
-        sp3.set_title("Prediction")
-        plt.imshow(prediction)
-
-        curr_image_num += 1
+    for i, (ax, im) in enumerate(zip(grid, images)):
+        # Iterating over the grid returns the Axes.
+        ax.imshow(im)
+        if titles is not None:
+            title = titles[i]
+        ax.set_title(title)
 
     plt.show()
+
+# TODO:
+# Trying to figure out why sino_pred is darker than the rest
+# In doing so, I found out that ensuretype doesnt actually cast to a tensor, as I thought it did
+def display_image_truth_and_prediction(sino_input, sino_gt, sino_pred, back_projector=None):
+    images_to_display = [sino_input, sino_gt, sino_pred]
+    titles = ["Input Sinogram", "GT Sinogram", "Predicted Sinogram"]
+    grid_shape = (1, 3)
+    if back_projector is not None:
+        images_to_display.append(back_projector(sino_input))
+        titles.append("Input Reconstructed")
+
+        images_to_display.append(back_projector(sino_gt))
+        titles.append("GT Reconstructed")
+
+        images_to_display.append(back_projector(sino_pred))
+        titles.append("Prediction Reconstructed")
+
+        grid_shape = (2, 3)
+
+    _display_images_in_grid(images_to_display, grid_shape, titles)
 
 
 def run_inference(model, input_image, device):
@@ -417,6 +434,7 @@ def predict_image_and_show(
     device,
     gt=None,
     eval_metric=monai.metrics.MSEMetric(),
+    back_projector=None
 ):
 
     prediction = run_inference(model, image, device)
@@ -427,7 +445,7 @@ def predict_image_and_show(
         print("Evaluation metric:", eval_metric(prediction_arr, gt_arr))
 
     # Display
-    _display_image_truth_and_prediction(image, gt, prediction)
+    display_image_truth_and_prediction(image, gt, prediction, back_projector)
 
 
 
@@ -437,7 +455,7 @@ def train_model(
     val_loader,
     device,
     num_epochs=NUM_EPOCHS,
-    loss_function=nn.MSELoss(),
+    loss_function=nn.L1Loss(),
 ):
 
     model.to(device)
@@ -465,7 +483,7 @@ def train_model(
         imgs, masks = batchdata
         return imgs.to(device), masks.to(device)
 
-    key_val_metric = {"MSE": MeanSquaredError(output_transform=trans_batch_val)}
+    key_val_metric = {"MAE": MeanAbsoluteError(output_transform=trans_batch_val)}
     MODEL_SAVE_DIR.mkdir(parents=True, exist_ok=True)
     checkpoint_saver = CheckpointSaver(
         save_dir=MODEL_SAVE_DIR,
@@ -520,9 +538,9 @@ def train_model(
         batch_sizes.clear()
 
         # fetch and report the validation metrics
-        mse = evaluator.state.metrics["MSE"]
+        mse = evaluator.state.metrics["MAE"]
         metric_values.append(mse)
-        print(f"evaluation for epoch {engine.state.epoch},  MSE = {mse:.4f}")
+        print(f"evaluation for epoch {engine.state.epoch},  MAE = {mse:.4f}")
 
     trainer.run()
 
@@ -575,6 +593,7 @@ def main():
     if args.sub_command == "predict_and_show":
         model = load_model()
         image, gt = None, None
+        back_projector = None
         if args.random_image:
             image, gt = get_random_image_and_gt(TRAIN_X_DIR, TRAIN_Y_DIR)
 
@@ -585,7 +604,10 @@ def main():
         else:
             raise RuntimeError("Please specify either --random_image or --image_path and --gt_path")
 
-        predict_image_and_show(model, image, device, gt)
+
+        if args.show_iradon:
+            back_projector = back_project_iradon
+        predict_image_and_show(model, image, device, gt, back_projector=back_projector)
 
     if args.sub_command == "train":
         model = get_model()
