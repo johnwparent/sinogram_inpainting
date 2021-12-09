@@ -102,6 +102,7 @@ def _construct_parser():
     sub_parsers.add_parser("extract", help="Extract data")
     sub_parsers.add_parser("extract_synthetic_data")
     sub_parsers.add_parser("train", help="Train a fresh model")
+    sub_parsers.add_parser("test", help="Test a trained model")
 
 
     sub_parser_predict_and_show = sub_parsers.add_parser("predict_and_show")
@@ -210,7 +211,7 @@ def back_project_iradon(im, theta=None):
     if isinstance(im, itk.Image):
         im = itk.array_from_image(im)
 
-    rec_im_arr = skimage.transform.iradon(im, theta, circle=False)
+    rec_im_arr = skimage.transform.iradon(im, theta, circle=False, preserve_range=False)
     return rec_im_arr.astype(np.float32)
     # return itk.image_from_array(rec_im_arr.astype(np.float32))
 
@@ -281,8 +282,10 @@ def _display_images_in_grid(images, grid_shape, titles=None):
     plt.show()
 
 # TODO:
-# Trying to figure out why sino_pred is darker than the rest
+# Trying to figure out why sino_pred is darker than the rest. Essentially pixel values aren't actually scaled to 0-1.
 # In doing so, I found out that ensuretype doesnt actually cast to a tensor when itk image is passed
+# TODO: Display these correctly with metrics printed.
+# TODO: testing function.
 def display_image_truth_and_prediction(sino_input, sino_gt, sino_pred, back_projector=None):
     images_to_display = [sino_input, sino_gt, sino_pred]
     titles = ["Input Sinogram", "GT Sinogram", "Predicted Sinogram"]
@@ -394,6 +397,17 @@ def main():
         )
         val_losses = train_model(model, train_loader, val_loader, device)
         print(val_losses)
+
+    if args.sub_command == "test":
+        model = load_model()
+        test_loader = get_data_loader(
+            TEST_X_DIR,
+            TEST_Y_DIR,
+            xtransforms=test_x_transforms,
+            ytransforms=test_y_transforms,
+        )
+
+        test_model(model, test_loader, device)
 
 
 
