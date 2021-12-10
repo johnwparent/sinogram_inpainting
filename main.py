@@ -27,6 +27,7 @@ from monai.data import ArrayDataset, DataLoader
 from dl_with_unet import *
 from skimage import exposure
 
+from monai.transforms import ScaleIntensity
 
 # Any and all data goes here
 DATA_DIR = Path("data")
