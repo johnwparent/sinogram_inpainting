@@ -4,6 +4,7 @@
 
 import argparse
 import glob
+from skimage.exposure.exposure import rescale_intensity
 import skimage.transform
 import itk
 import shutil
@@ -24,6 +25,7 @@ from pathlib import Path
 
 from monai.data import ArrayDataset, DataLoader
 from dl_with_unet import *
+from skimage import exposure
 
 
 # Any and all data goes here
@@ -88,7 +90,6 @@ RawDataImageType = itk.Image[PixelType, InputDataDim]
 ImageType = itk.Image[PixelType, ExtractedDataDim]
 
 
-
 def _construct_parser():
     """
     Constructs the ArgumentParser object with the appropriate options
@@ -104,14 +105,17 @@ def _construct_parser():
     sub_parsers.add_parser("train", help="Train a fresh model")
     sub_parsers.add_parser("test", help="Test a trained model")
 
-
     sub_parser_predict_and_show = sub_parsers.add_parser("predict_and_show")
     # TODO: Do mutual exclusion properly here
     # group = sub_parser_predict_and_show.add_mutually_exclusive_group(required=True)
-    sub_parser_predict_and_show.add_argument('--show_iradon', action='store_true', help="Run each of the images through iradon")
-    sub_parser_predict_and_show.add_argument('--random_image', action='store_true')
-    sub_parser_predict_and_show.add_argument('--image_path', action='store')
-    sub_parser_predict_and_show.add_argument('--gt_path', action='store')
+    sub_parser_predict_and_show.add_argument(
+        "--show_iradon",
+        action="store_true",
+        help="Run each of the images through iradon",
+    )
+    sub_parser_predict_and_show.add_argument("--random_image", action="store_true")
+    sub_parser_predict_and_show.add_argument("--image_path", action="store")
+    sub_parser_predict_and_show.add_argument("--gt_path", action="store")
 
     return my_parser
 
@@ -141,6 +145,7 @@ def remove_random_cols_of_image(sino: itk.Image, frac_to_remove=0.1):
     sino_arr[:, cols_to_remove] = np.zeros((num_rows, 1))
 
     return itk.image_from_array(sino_arr)
+
 
 def extract_data(
     sino_x_dir,
@@ -202,18 +207,20 @@ def forward_project_radon(im: itk.Image, theta=None):
     sino_arr = skimage.transform.radon(im, theta=theta, circle=False)
     return itk.image_from_array(sino_arr)
 
+
 def back_project_iradon(im, theta=None):
-    '''
+    """
     Back projects using iradon. Note that the reconstructed image does not have
     meaningful spacing, direction, etc. and should be used for displaying ONLY.
-    '''
+    """
 
     if isinstance(im, itk.Image):
         im = itk.array_from_image(im)
 
-    rec_im_arr = skimage.transform.iradon(im, theta, circle=False, preserve_range=False)
-    return rec_im_arr.astype(np.float32)
-    # return itk.image_from_array(rec_im_arr.astype(np.float32))
+    im = exposure.rescale_intensity(im)
+
+    rec_im_arr = skimage.transform.iradon(im, theta, circle=False)
+    return itk.image_from_array(rec_im_arr)
 
 
 def generate_synthetic_data(
@@ -281,48 +288,70 @@ def _display_images_in_grid(images, grid_shape, titles=None):
 
     plt.show()
 
+
+def my_normalize(arr):
+    arr -= np.min(arr)
+    return arr / np.max(arr)
+
+
+def _convert_to_array_if_itk_image(image):
+    if isinstance(image, itk.Image):
+        return itk.array_from_image(image)
+
+
 # TODO:
-# Trying to figure out why sino_pred is darker than the rest. Essentially pixel values aren't actually scaled to 0-1.
-# In doing so, I found out that ensuretype doesnt actually cast to a tensor when itk image is passed
+# In doing so, I found out that ensuretype doesnt actually cast to a tensor when itk image is passed. Check out monai tests for ensuretype
 # TODO: Display these correctly with metrics printed.
-# TODO: testing function.
-def display_image_truth_and_prediction(sino_input, sino_gt, sino_pred, back_projector=None):
+def display_image_truth_and_prediction(
+    sino_input,
+    sino_gt,
+    sino_pred,
+    eval_metric=monai.metrics.MSEMetric(),
+    back_projector=None,
+):
+    rescale_intensity = ScaleIntensity()
+    sino_input = rescale_intensity(_convert_to_array_if_itk_image(sino_input))
+    sino_gt = rescale_intensity(_convert_to_array_if_itk_image(sino_gt))
+    sino_pred = rescale_intensity(_convert_to_array_if_itk_image(sino_pred))
+
     images_to_display = [sino_input, sino_gt, sino_pred]
     titles = ["Input Sinogram", "GT Sinogram", "Predicted Sinogram"]
     grid_shape = (1, 3)
+
+    metric_value_sinos = eval_metric(torch.Tensor(sino_pred).unsqueeze(0), torch.Tensor(sino_gt).unsqueeze(0)).item()
+    print("Metric prediction and ground truth sinos:", metric_value_sinos)
     if back_projector is not None:
-        images_to_display.append(back_projector(sino_input))
+        rec_input = back_projector(sino_input)
+        images_to_display.append(rec_input)
         titles.append("Input Reconstructed")
 
-        images_to_display.append(back_projector(sino_gt))
+        rec_gt = back_projector(sino_gt)
+        images_to_display.append(rec_gt)
         titles.append("GT Reconstructed")
 
-        images_to_display.append(back_projector(sino_pred))
+        rec_pred = back_projector(sino_pred)
+        images_to_display.append(rec_pred)
         titles.append("Prediction Reconstructed")
 
         grid_shape = (2, 3)
 
     _display_images_in_grid(images_to_display, grid_shape, titles)
 
-
+# TODO: Make this modular so gt is not required
 def predict_image_and_show(
     model,
     image,
     device,
-    gt=None,
+    gt,
     eval_metric=monai.metrics.MSEMetric(),
-    back_projector=None
+    back_projector=None,
 ):
 
     prediction = run_inference(model, image, device)
-    if gt is not None:
-        # TODO: get the evaluation metric printing out the correct result here. Need to include scaling.
-        prediction_arr = torch.Tensor(itk.array_from_image(prediction)).unsqueeze(0)
-        gt_arr = torch.Tensor(itk.array_from_image(gt)).unsqueeze(0)
-        print("Evaluation metric:", eval_metric(prediction_arr, gt_arr))
-
     # Display
-    display_image_truth_and_prediction(image, gt, prediction, back_projector)
+    display_image_truth_and_prediction(
+        image, gt, prediction, eval_metric, back_projector
+    )
 
 
 def get_random_image_and_gt(image_dir, gt_dir):
@@ -339,7 +368,6 @@ def get_random_image_and_gt(image_dir, gt_dir):
 
     # Assuming image and gt fnames are the same, just in different dirs
     gt_path = str(gt_dir / image_fname)
-
     return itk.imread(str(random_im_path)), itk.imread(gt_path)
 
 
@@ -354,9 +382,7 @@ def main():
     #     extract_data()
 
     elif args.sub_command == "extract_synthetic_data":
-        extract_data(
-            SYNTHETIC_INCOMPLETE_SINO_DIR, SYNTHETIC_SINO_DIR
-        )
+        extract_data(SYNTHETIC_INCOMPLETE_SINO_DIR, SYNTHETIC_SINO_DIR)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if device == "cuda":
@@ -374,8 +400,9 @@ def main():
             gt = itk.imread(args.gt_path)
 
         else:
-            raise RuntimeError("Please specify either --random_image or --image_path and --gt_path")
-
+            raise RuntimeError(
+                "Please specify either --random_image or --image_path and --gt_path"
+            )
 
         if args.show_iradon:
             back_projector = back_project_iradon
@@ -408,8 +435,6 @@ def main():
         )
 
         test_model(model, test_loader, device)
-
-
 
 
 if __name__ == "__main__":
