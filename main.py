@@ -4,6 +4,7 @@
 
 import argparse
 import glob
+from monai.transforms.utility.array import TorchVision
 from skimage.exposure.exposure import rescale_intensity
 import skimage.transform
 import itk
@@ -24,7 +25,8 @@ from monai.data import partition_dataset
 from pathlib import Path
 
 from monai.data import ArrayDataset, DataLoader
-from dl_with_unet import *
+# from dl_with_unet import *
+from pcon_unet.train import *
 from skimage import exposure
 
 from monai.transforms import ScaleIntensity
@@ -385,7 +387,7 @@ def main():
     elif args.sub_command == "extract_synthetic_data":
         extract_data(SYNTHETIC_INCOMPLETE_SINO_DIR, SYNTHETIC_SINO_DIR)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = "cpu" #torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if device == "cuda":
         torch.cuda.empty_cache()
 
@@ -407,9 +409,30 @@ def main():
 
         if args.show_iradon:
             back_projector = back_project_iradon
-        predict_image_and_show(model, image, device, gt, back_projector=back_projector)
+        val_loader = get_data_loader(
+            VAL_X_DIR,
+            VAL_Y_DIR,
+            xtransforms=val_x_transforms,
+            ytransforms=val_y_transforms,
+        )
+        predict_image_and_show(model, val_loader, device, gt, back_projector=back_projector)
 
     if args.sub_command == "train":
+        # model = get_model()
+        # train_loader = get_data_loader(
+        #     TRAIN_X_DIR,
+        #     TRAIN_Y_DIR,
+        #     xtransforms=train_x_transforms,
+        #     ytransforms=train_y_transforms,
+        # )
+        # val_loader = get_data_loader(
+        #     VAL_X_DIR,
+        #     VAL_Y_DIR,
+        #     xtransforms=val_x_transforms,
+        #     ytransforms=val_y_transforms,
+        # )
+        # val_losses = train_model(model, train_loader, val_loader, device)
+        # print(val_losses)
         model = get_model()
         train_loader = get_data_loader(
             TRAIN_X_DIR,

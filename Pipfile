@@ -1,0 +1,23 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+monai = "*"
+torch = "*"
+itk = "*"
+sklearn = "*"
+ignite = "*"
+numpy = "*"
+pytorch-ignite = "*"
+scikit-image = "*"
+matplotlib = "*"
+torchsummary = "*"
+tqdm = "*"
+torchvision = "*"
+
+[dev-packages]
+
+[requires]
+python_version = "3.8"
