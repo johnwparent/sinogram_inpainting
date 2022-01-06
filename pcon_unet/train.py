@@ -1,6 +1,9 @@
 import torch
 import itk
 import numpy as np
+import os
+import sys
+import segmentation_models_pytorch as smp
 from tqdm import tqdm
 
 from . import model, util, loss
@@ -31,8 +34,19 @@ from monai.handlers import (
     MeanSquaredError,
 )
 from torch import optim, nn
+from torchvision import models
 from torchvision.utils import make_grid
 from torchvision.utils import save_image
+
+sys.path.append(os.path.abspath(os.path.join(__file__, '..', '..')))
+from partialconv.models.loss import VGG16PartialLoss
+
+__imp = 0
+if not __imp:
+    vgg16 = models.vgg16(pretrained=True)
+    torch.save(vgg16.state_dict(), "vgg.pth")
+    __imp = 1
+
 
 NETWORK_INPUT_SIZE = (256, 256)
 NUM_EPOCHS = 50
@@ -222,19 +236,23 @@ def train_model(
     val_loader,
     device,
     num_epochs=NUM_EPOCHS,
-    loss_function=loss.InpaintingLoss(loss.VGG16FeatureExtractor()),
+    loss_function=VGG16PartialLoss(vgg_path="vgg.pth"),
 ):
     '''
     Should train model and save best model to a known path.
     Returns the validation losses
     '''
+    loss_function = nn.L1Loss(size_average=True)
+    model =  smp.Unet(
+        encoder_weights="imagenet", in_channels=1, classes=1, activation=None
+    )
     train_gen = iter(train_loader)
     model.to(device)
+    model.train()
     # TODO: Keep track of the cumulative loss.
     optimizer = optim.Adam(model.parameters(), lr=0.03)
     loss = 0.0
     for i in tqdm(range(num_epochs)):
-        model.train()
         try:
             image, gt = [x.to(device) for x in next(train_gen)]
         except StopIteration:
@@ -242,13 +260,14 @@ def train_model(
             image, gt = [x.to(device) for x in next(train_gen)]
         mask = gt - image
         output, _ = model(image, mask)
-        loss_dict = loss_function(image, mask, output, gt)
-        LAMBDA_DICT = {
-    'valid': 1.0, 'hole': 6.0, 'tv': 0.1, 'prc': 0.05, 'style': 120.0}
-        loss = 0.0
-        for key, coef in LAMBDA_DICT.items():
-            value = coef * loss_dict[key]
-            loss += value
+    #     loss_dict = loss_function(image, mask, output, gt)
+    #     LAMBDA_DICT = {
+    # 'valid': 1.0, 'hole': 6.0, 'tv': 0.1, 'prc': 0.05, 'style': 120.0}
+    #     loss = 0.0
+    #     for key, coef in LAMBDA_DICT.items():
+    #         value = coef * loss_dict[key]
+    #         loss += value
+        loss = loss_function(output, gt)
 
         optimizer.zero_grad()
         loss.backward()
@@ -264,6 +283,7 @@ def train_model(
 
         if (i + 1) % 10 == 0:
             try:
+                print("Loss: {}: {}".format(loss.item(), input.size(0)))
                 model.eval()
                 evaluate(model, val_loader, device,
                         'images/test_{:d}.jpg'.format(i + 1))

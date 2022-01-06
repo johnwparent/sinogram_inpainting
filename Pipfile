@@ -16,6 +16,7 @@ matplotlib = "*"
 torchsummary = "*"
 tqdm = "*"
 torchvision = "*"
+segmentation-models-pytorch = "*"
 
 [dev-packages]
 

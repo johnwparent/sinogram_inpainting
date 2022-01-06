@@ -10,6 +10,7 @@ import skimage.transform
 import itk
 import shutil
 import numpy as np
+from torch.serialization import save
 import util
 
 import monai
@@ -352,9 +353,10 @@ def predict_image_and_show(
 
     prediction = run_inference(model, image, device)
     # Display
-    display_image_truth_and_prediction(
-        image, gt, prediction, eval_metric, back_projector
-    )
+    # display_image_truth_and_prediction(
+    #     image, gt, prediction, eval_metric, back_projector
+    # )
+    save_image(prediction, "tst1.jpg")
 
 
 def get_random_image_and_gt(image_dir, gt_dir):

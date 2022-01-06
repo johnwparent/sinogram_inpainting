@@ -23,13 +23,37 @@ class VGG16FeatureExtractor(nn.Module):
             results.append(func(results[-1]))
         return results[1:]
 
+def make_vgg16_layers(style_avg_pool = False):
+    """
+    make_vgg16_layers
+    Return a custom vgg16 feature module with avg pooling
+    """
+    vgg16_cfg = [
+        64, 64, 'M', 128, 128, 'M', 256, 256, 256, 'M',
+        512, 512, 512, 'M', 512, 512, 512, 'M'
+    ]
+
+    layers = []
+    in_channels = 3
+    for v in vgg16_cfg:
+        if v == 'M':
+            if style_avg_pool:
+                layers += [nn.AvgPool2d(kernel_size=2, stride=2)]
+            else:
+                layers += [nn.MaxPool2d(kernel_size=2, stride=2)]
+        else:
+            conv2d = nn.Conv2d(in_channels, v, kernel_size=3, padding=1)
+            layers += [conv2d, nn.ReLU(inplace=True)]
+            in_channels = v
+    return nn.Sequential(*layers)
 
 def gram_matrix(feat):
     # https://github.com/pytorch/examples/blob/master/fast_neural_style/neural_style/utils.py
     (b, ch, h, w) = feat.size()
     feat = feat.view(b, ch, h * w)
     feat_t = feat.transpose(1, 2)
-    gram = torch.bmm(feat, feat_t) / (ch * h * w)
+    inp = torch.zeros(b, ch, ch).type(feat.type())
+    gram = torch.baddbmm(inp, feat, feat_t, beta=0, alpha=1./(ch * h * w), out=None)
     return gram
 
 
