@@ -53,7 +53,7 @@ train_x_transforms = Compose(
         # Resize(NETWORK_INPUT_SHAPE, mode="nearest"),
         # # RandZoom(prob=0.5, min_zoom=0.9, max_zoom=1.3, mode="nearest"), # TODO: Make sure we dont center zoom at cut out the top. Uncomment
         ScaleIntensity(),
-        RandFlip(prob=0.5, spatial_axis=1),
+        # RandFlip(prob=0.5, spatial_axis=1),
     ]
 )
 train_y_transforms = Compose(
@@ -65,7 +65,7 @@ train_y_transforms = Compose(
         # Resize(NETWORK_INPUT_SHAPE, mode="nearest"),
         # # RandZoom(prob=0.5, min_zoom=0.9, max_zoom=1.3, mode="nearest"), # TODO: Make sure we dont center zoom at cut out the top. Uncomment
         ScaleIntensity(),
-        RandFlip(prob=0.5, spatial_axis=1),
+        # RandFlip(prob=0.5, spatial_axis=1),
     ]
 )
 val_x_transforms = Compose(
