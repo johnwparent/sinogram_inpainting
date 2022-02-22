@@ -114,7 +114,17 @@ def _construct_parser():
         type=Path,
         help="Directory to the y sinogram data without missing portions"
     )
-    sub_parsers.add_parser("extract_synthetic_data")
+    sub_parser_extract.add_argument(
+        "--no_shuffle",
+        action="store_true",
+        help="Dont shuffle the filenames before assigning to train, test, val.",
+    )
+    sub_parser_extract_synth = sub_parsers.add_parser("extract_synthetic_data")
+    sub_parser_extract_synth.add_argument(
+        "--no_shuffle",
+        action="store_true",
+        help="Dont shuffle the filenames before assigning to train, test, val.",
+    )
     sub_parsers.add_parser("train", help="Train a fresh model")
     sub_parsers.add_parser("test", help="Test a trained model")
 
@@ -166,12 +176,16 @@ def extract_data(
     train_split=0.6,
     val_split=0.2,
     test_split=0.2,
+    random_shuffle=True
 ):
     """
     Note that if the splits dont add up to 1, the ratio is taken
     """
 
-    all_fnames = [fp.name for fp in sino_x_dir.glob("*.*") if fp.is_file()]
+    all_fnames = np.array([fp.name for fp in sino_x_dir.glob("*.*") if fp.is_file()])
+    if random_shuffle:
+        np.random.shuffle(all_fnames)
+
 
     datalist = [
         {
@@ -392,10 +406,10 @@ def main():
         generate_synthetic_data()
 
     elif args.sub_command == "extract":
-        extract_data(args.sino_x_dir, args.sino_y_dir)
+        extract_data(args.sino_x_dir, args.sino_y_dir, random_shuffle=not args.no_shuffle)
 
     elif args.sub_command == "extract_synthetic_data":
-        extract_data(SYNTHETIC_INCOMPLETE_SINO_DIR, SYNTHETIC_SINO_DIR)
+        extract_data(SYNTHETIC_INCOMPLETE_SINO_DIR, SYNTHETIC_SINO_DIR, random_shuffle=not args.no_shuffle)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if device == "cuda":
