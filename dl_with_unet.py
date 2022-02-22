@@ -35,7 +35,7 @@ NETWORK_INPUT_SIZE = (256, 256)
 NUM_EPOCHS = 10
 
 # This is part of the API, main.py relies on a default number of epochs
-BATCH_SIZE = 16
+BATCH_SIZE = 8
 
 BEST_MODEL_NAME = "best_model.pt"
 MODEL_SAVE_DIR = Path("./models")
