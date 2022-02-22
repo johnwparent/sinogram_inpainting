@@ -277,9 +277,9 @@ def train_model(
         batch_sizes.clear()
 
         # fetch and report the validation metrics
-        mse = evaluator.state.metrics["MAE"]
-        metric_values.append(mse)
-        print(f"evaluation for epoch {engine.state.epoch},  MAE = {mse:.4f}")
+        mae = evaluator.state.metrics["MAE"]
+        metric_values.append(mae)
+        print(f"evaluation for epoch {engine.state.epoch},  MAE = {mae:.4f}")
 
     trainer.run()
 
