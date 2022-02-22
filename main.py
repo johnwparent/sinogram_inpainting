@@ -406,7 +406,7 @@ def main():
         image, gt = None, None
         back_projector = None
         if args.random_image:
-            image, gt = get_random_image_and_gt(TRAIN_X_DIR, TRAIN_Y_DIR)
+            image, gt = get_random_image_and_gt(TEST_X_DIR, TEST_Y_DIR)
 
         elif args.image_path and args.gt_path:
             image = itk.imread(args.image_path)
