@@ -32,7 +32,7 @@ from monai.handlers import (
 from torch import optim, nn
 
 NETWORK_INPUT_SIZE = (256, 256)
-NUM_EPOCHS = 200
+NUM_EPOCHS = 10
 
 # This is part of the API, main.py relies on a default number of epochs
 BATCH_SIZE = 16
