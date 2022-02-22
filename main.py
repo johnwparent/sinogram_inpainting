@@ -101,7 +101,19 @@ def _construct_parser():
     sub_parsers = my_parser.add_subparsers(dest="sub_command")
 
     sub_parsers.add_parser("generate_synthetic_data")
-    sub_parsers.add_parser("extract", help="Extract data")
+    sub_parser_extract = sub_parsers.add_parser("extract", help="Extract data")
+    sub_parser_extract.add_argument(
+        "--sino_x_dir",
+        action="store",
+        type=Path,
+        help="Directory to the incomplete sinogram data"
+    )
+    sub_parser_extract.add_argument(
+        "--sino_y_dir",
+        action="store",
+        type=Path,
+        help="Directory to the y sinogram data without missing portions"
+    )
     sub_parsers.add_parser("extract_synthetic_data")
     sub_parsers.add_parser("train", help="Train a fresh model")
     sub_parsers.add_parser("test", help="Test a trained model")
@@ -379,8 +391,8 @@ def main():
     if args.sub_command == "generate_synthetic_data":
         generate_synthetic_data()
 
-    # elif args.sub_command == "extract":
-    #     extract_data()
+    elif args.sub_command == "extract":
+        extract_data(args.sino_x_dir, args.sino_y_dir)
 
     elif args.sub_command == "extract_synthetic_data":
         extract_data(SYNTHETIC_INCOMPLETE_SINO_DIR, SYNTHETIC_SINO_DIR)
