@@ -4,7 +4,6 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
-monai = "*"
 torch = "*"
 itk = "*"
 sklearn = "*"
@@ -17,6 +16,7 @@ torchsummary = "*"
 tqdm = "*"
 torchvision = "*"
 segmentation-models-pytorch = "*"
+monai = "==0.6.0"
 
 [dev-packages]
 

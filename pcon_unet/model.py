@@ -2,100 +2,74 @@ import os
 import sys
 
 import torch
-import torch.nn
-import torch.nn.functional as F
-from torch import nn, cuda
-from torch.autograd import Variable
+from torch.nn import functional as F
+from torch import nn
 
 sys.path.append(os.path.abspath(os.path.join(__file__, '..', '..')))
 from partialconv.models.partialconv2d import PartialConv2d
 
-# We need to create a UNet as the Generator for the GAN as to span feature space
-# USE the normal partial resnet pretrained w/ transfer learning to discriminate
-# generator should just encode, then noise, then generate.
 
-class UNetPconv(torch.nn.Module):
+class UNetPconv(nn.Module):
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.down1 = downStep(1, 64)
-        self.down2 = downStep(64, 128)
-        self.down3 = downStep(128, 256)
-        # self.down4 = downStep(256, 512)
-        # self.down5 = downStep(512, 1024)
-        # self.up1 = upStep(1536, 512)
-        # self.up2 = upStep(768, 256)
-        self.up3 = upStep(384, 128)
-        self.up4 = upStep(192, 64, withReLU = False)
+        super(UNetPconv, self).__init__()
+        self.l1 = PCONVLayer(1, 64)
+        self.l3 = PCONVLayer(64, 128)
+        self.l4 = PCONVLayer(128, 256)
+        self.l5 = PCONVLayer(256, 512)      # Encoding Section
+        self.l6 = PCONVLayer(512, 512)
+        self.l7 = PCONVLayer(512, 512)
+        self.l8 = PCONVLayer(512, 512)
+        self.l9 = PCONVLayer(512, 512)
 
-    def forward(self, x, m):
-        x1, m1 = self.down1(x, m)
-        x2, m2 = self.down2(x1, m1)
-        x3, m3 = self.down3(x2, m2)
-        # x4, m4 = self.down4(x3, m3)
-        # x5, m5 = self.down5(x4, m4)
+        self.l10 = PCONVLayer(2 * 512, 512, mc=True)
+        self.l11 = PCONVLayer(2 * 512, 512, mc=True)
+        self.l12 = PCONVLayer(2 * 512, 512, mc=True)
+        self.l13 = PCONVLayer(2 * 512, 512, mc=True)
+        self.l14 = PCONVLayer(512 + 256, 256, mc=True)     # Decoding Section
+        self.l15 = PCONVLayer(256 + 128, 128, mc=True)
+        self.l16 = PCONVLayer(128 + 64, 64, mc=True)
+        self.l17 = PCONVLayer(64 + 1, 1, mc=True, bn=False)
 
-        # x, m = self.up1(x5, x4, m5, m4)
-        # x, m = self.up2(x, x3, m, m3)
-        x, m = self.up3(x3, x2, m3, m2)
-        x, m = self.up4(x, x1, m, m1)
+    def forward(self, x, mask):
+        x1, m1 = self.l1(x, mask)
+        x3, m3 = self.l3(x1, m1)
+        x4, m4 = self.l4(x3, m3)
+        x5, m5 = self.l5(x4, m4)
+        x6, m6 = self.l6(x5, m5)
+        x7, m7 = self.l7(x6, m6)
+        x8, m8 = self.l8(x7, m7)
+        x9, m9 = self.l9(x8, m8)
 
-        return x, m
+        def tcat(m1, m2):
+            return torch.cat([F.interpolate(m1, m2.shape[2:]), m2], dim=1)
+
+        def trep(m1, sin, sout):
+            return torch.cat(
+                             [m1[:,0].unsqueeze(1).repeat(1, sin, 1, 1),
+                              m1[:,1].unsqueeze(1).repeat(1, sout, 1, 1)],
+                             dim=1)
+
+        x10, m10 = self.l10(tcat(x9, x8),  trep(tcat(m9, m8), 512, 512))
+        x11, m11 = self.l11(tcat(x10, x7), trep(tcat(m10, m7), 512, 512))
+        x12, m12 = self.l12(tcat(x11, x6), trep(tcat(m11, m6), 512, 512))
+        x13, m13 = self.l13(tcat(x12, x5), trep(tcat(m12, m5), 512, 512))
+        x14, m14 = self.l14(tcat(x13, x4), trep(tcat(m13, m4), 512, 256))
+        x15, m15 = self.l15(tcat(x14, x3), trep(tcat(m14, m3), 256, 128))
+        x16, m16 = self.l16(tcat(x15, x1), trep(tcat(m15, m1), 128, 64))
+        out, _   = self.l17(tcat(x16, x),  trep(tcat(m16, mask), 64, 1))
+
+        return out
 
 
-class downStep(nn.Module):
-    def __init__(self, inC, outC):
-        super(downStep, self).__init__()
-        self.convLayer1 = PartialConv2d(inC, outC, kernel_size = 3, padding= 1, bias=False, multi_channel=True, return_mask=True)
-        self.convLayer2 = PartialConv2d(outC, outC, kernel_size = 3, padding= 1, bias=False, multi_channel=True, return_mask=True)
-        #self.batchNorm = nn.BatchNorm2d(outC)
-        self.relU = nn.ReLU(inplace=True)
+class PCONVLayer(nn.Module):
+    def __init__(self, in_shape: int, out_shape: int, activation: nn.Module = None, bn:bool = True, mc: bool = False):
+        super(PCONVLayer, self).__init__()
+        self.cov = PartialConv2d(in_shape, out_shape, 3, 1, padding=1, return_mask=True, multi_channel=mc)
+        self.act = activation if activation else nn.LeakyReLU(negative_slope=0.2)
+        self.batchnorm = nn.BatchNorm2d(out_shape) if bn else lambda x: x
 
-    def forward(self, x, m):
-        # todo
-        x, m = self.convLayer1(x, m)
-        x = self.relU(x)
-        #x = self.batchNorm(x)
-        x, m = self.convLayer2(x, m)
-        x = self.relU(x)
-        #x = self.batchNorm(x)
-        return x, m
-
-
-class upStep(nn.Module):
-    def __init__(self, inC, outC, withReLU=True):
-        super(upStep, self).__init__()
-        self.convLayer1 = PartialConv2d(inC, outC, kernel_size = 3, padding= 1, bias=False, multi_channel=True, return_mask=True)
-        self.convLayer2 = PartialConv2d(outC, outC, kernel_size = 3, padding= 1, bias=False, multi_channel=True, return_mask=True)
-        self.convLayer3 = PartialConv2d(outC, 1, kernel_size = 3, padding= 1, bias=False, multi_channel=True, return_mask=True)
-        self.sig = nn.Sigmoid()
-        self.relU = nn.ReLU(inplace=True)
-        self.withReLU = withReLU
-        self.up = nn.Upsample(scale_factor = 2, mode = 'nearest')
-
-    def checkAndPadding(self, var1, var2):
-        if var1.size(2) > var2.size(2) or var1.size(3) > var2.size(3):
-            var1 = var1[:, :, :var2.size(2), :var2.size(3)]
-        else:
-            pad = [0, 0, int(var2.size(2) - var1.size(2)), int(var2.size(3) - var1.size(3))]
-            var1 = F.pad(var1, pad)
-        return var1, var2
-
-    def forward(self, x, x_down, m, m_down ):
-        x = self.up(x)
-        m = self.up(m.float())
-        x, x_down = self.checkAndPadding(x, x_down)
-        m, m_down = self.checkAndPadding(m, m_down)
-        x = torch.cat([x, x_down], 1)
-        m = torch.cat([m, m_down], 1)
-        x, m = self.convLayer1(x, m)
-        if self.withReLU:
-            x = self.relU(x)
-            #x = self.batchNorm(x)
-        x, m = self.convLayer2(x, m)
-        if self.withReLU:
-            x = self.relU(x)
-            #x = self.batchNorm(x)
-        else:
-            x, m = self.convLayer3(x, m)
-            x = self.sig(x)
-        return x, m
+    def forward(self, x, mask):
+        x, mask = self.cov(x, mask_in=mask)
+        x = self.batchnorm(x)
+        x = self.act(x)
+        return x, mask

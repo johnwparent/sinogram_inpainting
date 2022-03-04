@@ -5,9 +5,14 @@ from torch import nn, cuda
 from torch.autograd import Variable
 import nvidida/partialconv
 
-@property
+
 def discriminator():
     return torch.hub.load('pytorch/vision:v0.10.0', 'resnet152', pretrained=True)
+
+
+def unfreeze_for_retrain(torch_model):
+	pass
+
 
 # train the generator and discriminator
 def train(g_model, d_model, gan_model, dataset, latent_dim, n_epochs=100, n_batch=128):
