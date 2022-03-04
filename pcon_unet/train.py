@@ -1,3 +1,4 @@
+import itertools
 import torch
 import itk
 import numpy as np
@@ -6,7 +7,7 @@ import sys
 import segmentation_models_pytorch as smp
 from tqdm import tqdm
 
-from . import model, util, loss
+from . import model
 
 from pathlib import Path
 from monai.transforms import (
@@ -67,33 +68,39 @@ train_x_transforms = Compose(
         EnsureType(),
         AddChannel(),
         Resize(NETWORK_INPUT_SIZE),
-        # Resize(NETWORK_INPUT_SHAPE, mode="nearest"),
-        # # RandZoom(prob=0.5, min_zoom=0.9, max_zoom=1.3, mode="nearest"), # TODO: Make sure we dont center zoom at cut out the top. Uncomment
         ScaleIntensity(),
         RandFlip(prob=0.5, spatial_axis=1),
     ]
 )
+
 train_y_transforms = Compose(
     [
         LoadImage(image_only=True),
         EnsureType(),
         AddChannel(),
         Resize(NETWORK_INPUT_SIZE),
-        # Resize(NETWORK_INPUT_SHAPE, mode="nearest"),
-        # # RandZoom(prob=0.5, min_zoom=0.9, max_zoom=1.3, mode="nearest"), # TODO: Make sure we dont center zoom at cut out the top. Uncomment
         ScaleIntensity(),
         RandFlip(prob=0.5, spatial_axis=1),
     ]
 )
+
+train_mask_transforms = Compose(
+    [
+        LoadImage(image_only=True),
+        EnsureType(),
+        AddChannel(),
+        Resize(NETWORK_INPUT_SIZE),
+        RandFlip(prob=0.5, spatial_axis=1),
+    ]
+)
+
 val_x_transforms = Compose(
     [
         LoadImage(image_only=True),
         EnsureType(),
         AddChannel(),
         Resize(NETWORK_INPUT_SIZE),
-        # Resize(NETWORK_INPUT_SHAPE, mode="nearest"),
         ScaleIntensity(),
-        # EnsureType(),
     ]
 )
 
@@ -104,9 +111,15 @@ val_y_transforms = Compose(
         AddChannel(),
         Resize(NETWORK_INPUT_SIZE),
         ScaleIntensity(),
-        # Resize(NETWORK_INPUT_SHAPE, mode="nearest"),
-        # EnsureType(),
-        # AsDiscrete(to_onehot=True, n_classes=3),
+    ]
+)
+
+val_mask_tranforms = Compose(
+    [
+        LoadImage(image_only=True),
+        EnsureType(),
+        AddChannel(),
+        Resize(NETWORK_INPUT_SIZE),
     ]
 )
 
@@ -116,9 +129,7 @@ test_x_transforms = Compose(
         EnsureType(),
         AddChannel(),
         Resize(NETWORK_INPUT_SIZE),
-        # Resize(NETWORK_INPUT_SHAPE, mode="nearest"),
         ScaleIntensity(),
-        # EnsureType(),
     ]
 )
 
@@ -129,13 +140,8 @@ test_y_transforms = Compose(
         AddChannel(),
         Resize(NETWORK_INPUT_SIZE),
         ScaleIntensity(),
-        # Resize(NETWORK_INPUT_SHAPE, mode="nearest"),
-        # EnsureType(),
-        # AsDiscrete(to_onehot=True, n_classes=3),
     ]
 )
-
-
 
 itk_image_to_model_input = Compose(
     [
@@ -147,6 +153,7 @@ itk_image_to_model_input = Compose(
         EnsureType(),
     ]
 )
+
 
 def evaluate(model, dataset, device, filename):
     image, gt = next(iter(dataset))
@@ -242,54 +249,39 @@ def train_model(
     Should train model and save best model to a known path.
     Returns the validation losses
     '''
-    loss_function = nn.L1Loss(size_average=True)
-    model =  smp.Unet(
-        encoder_weights="imagenet", in_channels=1, classes=1, activation=None
-    )
     train_gen = iter(train_loader)
     model.to(device)
     model.train()
-    # TODO: Keep track of the cumulative loss.
+    lowest = 1E50
     optimizer = optim.Adam(model.parameters(), lr=0.03)
-    loss = 0.0
-    for i in tqdm(range(num_epochs)):
-        try:
-            image, gt = [x.to(device) for x in next(train_gen)]
-        except StopIteration:
-            train_gen = iter(train_loader)
-            image, gt = [x.to(device) for x in next(train_gen)]
-        mask = gt - image
-        output, _ = model(image, mask)
-    #     loss_dict = loss_function(image, mask, output, gt)
-    #     LAMBDA_DICT = {
-    # 'valid': 1.0, 'hole': 6.0, 'tv': 0.1, 'prc': 0.05, 'style': 120.0}
-    #     loss = 0.0
-    #     for key, coef in LAMBDA_DICT.items():
-    #         value = coef * loss_dict[key]
-    #         loss += value
-        loss = loss_function(output, gt)
+    for epoch in range(num_epochs):
+        model.train()
+        for imset in train_gen:
+            im, gt, mask = imset
+            im, gt, mask = im.to(device), gt.to(device), mask.to(device)
+            out = model(im, mask)
+            tot_loss, vgg_loss, style_loss = loss_function(out, gt)
+            optimizer.zero_grad()
+            tot_loss.backward()
+            optimizer.step()
+        print(f"[training] trained epoch: {epoch}")
+        model.eval()
 
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+        total_loss = 0
+        for imset in val_loader:
+            im, gt, mask = imset
+            im, gt, mask = im.to(device), gt.to(device), mask.to(device)
+            out = model(im, mask)
+            tot_loss, vgg_loss, style_loss = loss_function(out, gt)
+            total_loss += float(tot_loss.detach().cpu())
+        print(f"[validation] Total Loss val: {total_loss}")
 
-        if (i + 1) % 10 == 0 or (i + 1) == num_epochs:
-            try:
-                save_ckpt('{}/ckpt/{}.pt'.format(MODEL_SAVE_DIR, i + 1),
-                        [('model', model)], [('optimizer', optimizer)], i + 1)
-            except:
-                save_ckpt('{}.pt'.format(i + 1),
-                        [('model', model)], [('optimizer', optimizer)], i + 1)
-
-        if (i + 1) % 10 == 0:
-            try:
-                print("Loss: {}: {}".format(loss.item(), input.size(0)))
-                model.eval()
-                evaluate(model, val_loader, device,
-                        'images/test_{:d}.jpg'.format(i + 1))
-            except:
-                pass
-
+        if total_loss < lowest:
+            print("[EPOCH {}] Lowest loss {} found".format(epoch, total_loss))
+            torch.save(model.state_dict(),  os.path.join(os.getcwd(), 'models', 'ckpt', '{}.pt'.format(epoch)))
+            lowest = total_loss
+        else:
+            print("[EPOCH {}] loss is {}".format(epoch, total_loss))
 
 def test_model(model, test_loader, device):
     '''
