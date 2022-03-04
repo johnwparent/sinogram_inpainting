@@ -4,6 +4,7 @@
 
 import argparse
 import glob
+import os
 from skimage.exposure.exposure import rescale_intensity
 import skimage.transform
 import itk
@@ -139,6 +140,22 @@ def _construct_parser():
     sub_parser_predict_and_show.add_argument("--random_image", action="store_true")
     sub_parser_predict_and_show.add_argument("--image_path", action="store")
     sub_parser_predict_and_show.add_argument("--gt_path", action="store")
+
+    sub_parser_predict_and_write = sub_parsers.add_parser("predict_and_write")
+    sub_parser_predict_and_write.add_argument(
+        "--file_patterns",
+        nargs="+",
+        action="store",
+    )
+    sub_parser_predict_and_write.add_argument(
+        "--save_path",
+        type=Path,
+        action="store",
+    )
+    sub_parser_predict_and_write.add_argument(
+        "--keep_file_structure",
+        action="store_true",
+    )
 
     return my_parser
 
@@ -381,6 +398,27 @@ def predict_image_and_show(
     )
 
 
+def predict_and_write_to_disk(model, filepaths, save_path_root, device, keep_file_structure=True):
+    # TODO: licensing here
+    commonpath = None
+    if keep_file_structure and len(filepaths) > 1:
+        commonpath = os.path.commonpath(filepaths)
+
+    for fp in filepaths:
+        fp = Path(fp)
+        im = itk.imread(str(fp))
+        inpainted = run_inference(model, im, device)
+        # TODO: licensing here
+        save_path = save_path_root
+        if commonpath is not None:
+            parent_dir = fp.parents[0]
+            save_path = save_path_root / parent_dir.relative_to(commonpath)
+
+        save_path /= fp.name
+        print("Writing inpainted sinogram for", fp.name, "to", save_path)
+        itk.imwrite(inpainted, str(save_path))
+
+
 def get_random_image_and_gt(image_dir, gt_dir):
     if isinstance(image_dir, str):
         image_dir = Path(image_dir)
@@ -396,6 +434,16 @@ def get_random_image_and_gt(image_dir, gt_dir):
     # Assuming image and gt fnames are the same, just in different dirs
     gt_path = str(gt_dir / image_fname)
     return itk.imread(str(random_im_path)), itk.imread(gt_path)
+
+# TODO: licensing
+def get_filepaths_matching_pattern(pattern, recursive=False):
+    filepaths = []
+    for p in pattern:
+        filepaths.extend(glob.glob(p, recursive=recursive))
+
+    return set(filepaths)
+
+
 
 
 def main():
@@ -462,6 +510,13 @@ def main():
         )
 
         test_model(model, test_loader, device)
+
+    if args.sub_command == "predict_and_write":
+        model = load_model()
+        files = get_filepaths_matching_pattern(args.file_patterns, recursive=True)
+        if not args.save_path.exists():
+            args.save_path.mkdir()
+        predict_and_write_to_disk(model, files, args.save_path, device, args.keep_file_structure)
 
 
 if __name__ == "__main__":
