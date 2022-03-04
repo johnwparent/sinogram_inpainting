@@ -5,6 +5,7 @@
 import argparse
 import glob
 from monai.transforms.utility.array import TorchVision
+import os
 from skimage.exposure.exposure import rescale_intensity
 import skimage.transform
 import itk
@@ -19,14 +20,11 @@ import itk
 import numpy as np
 import matplotlib.pyplot as plt
 import shutil
-
-
 from mpl_toolkits.axes_grid1 import ImageGrid
 from monai.data import partition_dataset
 from pathlib import Path
 
 from monai.data import ArrayDataset, DataLoader
-# from dl_with_unet import *
 from pcon_unet.train import *
 from skimage import exposure
 
@@ -89,6 +87,14 @@ ExtractedDataDim = 2
 SourceImageType = itk.Image[PixelType, SourceDataDim]
 ImageType = itk.Image[PixelType, ExtractedDataDim]
 
+# ITK stuff
+PixelType = itk.F
+InputDataDim = 3
+ExtractedDataDim = 2
+
+RawDataImageType = itk.Image[PixelType, InputDataDim]
+ImageType = itk.Image[PixelType, ExtractedDataDim]
+
 
 def _construct_parser():
     """
@@ -97,25 +103,63 @@ def _construct_parser():
     """
 
     my_parser = argparse.ArgumentParser()
-    sub_parsers = my_parser.add_subparsers(dest='sub_command')
+    sub_parsers = my_parser.add_subparsers(dest="sub_command")
 
-    sub_parsers.add_parser('generate_synthetic_data')
-    sub_parsers.add_parser('extract', help='Extract data')
-    sub_parsers.add_parser('extract_synthetic_data')
-    sub_parsers.add_parser('train', help='Train a fresh model')
-    sub_parsers.add_parser('test', help='Test a trained model')
+    sub_parsers.add_parser("generate_synthetic_data")
+    sub_parser_extract = sub_parsers.add_parser("extract", help="Extract data")
+    sub_parser_extract.add_argument(
+        "--sino_x_dir",
+        action="store",
+        type=Path,
+        help="Directory to the incomplete sinogram data"
+    )
+    sub_parser_extract.add_argument(
+        "--sino_y_dir",
+        action="store",
+        type=Path,
+        help="Directory to the y sinogram data without missing portions"
+    )
+    sub_parser_extract.add_argument(
+        "--no_shuffle",
+        action="store_true",
+        help="Dont shuffle the filenames before assigning to train, test, val.",
+    )
+    sub_parser_extract_synth = sub_parsers.add_parser("extract_synthetic_data")
+    sub_parser_extract_synth.add_argument(
+        "--no_shuffle",
+        action="store_true",
+        help="Dont shuffle the filenames before assigning to train, test, val.",
+    )
+    sub_parsers.add_parser("train", help="Train a fresh model")
+    sub_parsers.add_parser("test", help="Test a trained model")
 
-    sub_parser_predict_and_show = sub_parsers.add_parser('predict_and_show')
+    sub_parser_predict_and_show = sub_parsers.add_parser("predict_and_show")
     # TODO: Do mutual exclusion properly here
     # group = sub_parser_predict_and_show.add_mutually_exclusive_group(required=True)
     sub_parser_predict_and_show.add_argument(
-        '--show_iradon',
-        action='store_true',
-        help='Run each of the images through iradon',
+        "--show_iradon",
+        action="store_true",
+        help="Run each of the images through iradon",
     )
-    sub_parser_predict_and_show.add_argument('--random_image', action='store_true')
-    sub_parser_predict_and_show.add_argument('--image_path', action='store')
-    sub_parser_predict_and_show.add_argument('--gt_path', action='store')
+    sub_parser_predict_and_show.add_argument("--random_image", action="store_true")
+    sub_parser_predict_and_show.add_argument("--image_path", action="store")
+    sub_parser_predict_and_show.add_argument("--gt_path", action="store")
+
+    sub_parser_predict_and_write = sub_parsers.add_parser("predict_and_write")
+    sub_parser_predict_and_write.add_argument(
+        "--file_patterns",
+        nargs="+",
+        action="store",
+    )
+    sub_parser_predict_and_write.add_argument(
+        "--save_path",
+        type=Path,
+        action="store",
+    )
+    sub_parser_predict_and_write.add_argument(
+        "--keep_file_structure",
+        action="store_true",
+    )
 
     return my_parser
 
@@ -132,8 +176,8 @@ def _extract_datalist(dl, xoutdir, youtdir, zoutdir):
 
         itk.imwrite(x, str(xoutdir / xfname))
         itk.imwrite(y, str(youtdir / yfname))
-        itk.imwrite(mask, str(zoutdir / maskname))
 
+        itk.imwrite(mask, str(zoutdir / maskname))
 def to_image(arr):
     return itk.image_from_array(arr)
 
@@ -160,12 +204,16 @@ def extract_data(
     train_split=0.6,
     val_split=0.2,
     test_split=0.2,
+    random_shuffle=True
 ):
     """
     Note that if the splits dont add up to 1, the ratio is taken
     """
 
-    all_fnames = [fp.name for fp in sino_x_dir.glob('*.*') if fp.is_file()]
+    all_fnames = np.array([fp.name for fp in sino_x_dir.glob("*.*") if fp.is_file()])
+    if random_shuffle:
+        np.random.shuffle(all_fnames)
+
 
     datalist = [
         {
@@ -361,13 +409,34 @@ def predict_image_and_show(
     eval_metric=monai.metrics.MSEMetric(),
     back_projector=None,
 ):
-
+    print("Not implemented")
     prediction = run_inference(model, image, device)
     # Display
     # display_image_truth_and_prediction(
     #     image, gt, prediction, eval_metric, back_projector
     # )
-    save_image(prediction, 'tst1.jpg')
+    # save_image(prediction, 'tst1.jpg')
+
+
+def predict_and_write_to_disk(model, filepaths, save_path_root, device, keep_file_structure=True):
+    # TODO: licensing here
+    commonpath = None
+    if keep_file_structure and len(filepaths) > 1:
+        commonpath = os.path.commonpath(filepaths)
+
+    for fp in filepaths:
+        fp = Path(fp)
+        im = itk.imread(str(fp))
+        inpainted = run_inference(model, im, device)
+        # TODO: licensing here
+        save_path = save_path_root
+        if commonpath is not None:
+            parent_dir = fp.parents[0]
+            save_path = save_path_root / parent_dir.relative_to(commonpath)
+
+        save_path /= fp.name
+        print("Writing inpainted sinogram for", fp.name, "to", save_path)
+        itk.imwrite(inpainted, str(save_path))
 
 
 def get_random_image_and_gt(image_dir, gt_dir):
@@ -386,6 +455,14 @@ def get_random_image_and_gt(image_dir, gt_dir):
     gt_path = str(gt_dir / image_fname)
     return itk.imread(str(random_im_path)), itk.imread(gt_path)
 
+# TODO: licensing
+def get_filepaths_matching_pattern(pattern, recursive=False):
+    filepaths = []
+    for p in pattern:
+        filepaths.extend(glob.glob(p, recursive=recursive))
+
+    return set(filepaths)
+
 
 def main():
     my_parser = _construct_parser()
@@ -394,43 +471,36 @@ def main():
     if args.sub_command == 'generate_synthetic_data':
         generate_synthetic_data()
 
-    # elif args.sub_command == 'extract':
-    #     extract_data()
+    elif args.sub_command == "extract":
+        extract_data(args.sino_x_dir, args.sino_y_dir, args.sino_mask_dir, random_shuffle=not args.no_shuffle)
 
-    elif args.sub_command == 'extract_synthetic_data':
-        extract_data(SYNTHETIC_INCOMPLETE_SINO_DIR, SYNTHETIC_SINO_DIR, SYNTHETIC_MASK_DIR)
+    elif args.sub_command == "extract_synthetic_data":
+        extract_data(SYNTHETIC_INCOMPLETE_SINO_DIR, SYNTHETIC_SINO_DIR, SYNTHETIC_MASK_DIR, random_shuffle=not args.no_shuffle)
 
-    device = 'cpu' #torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    if device == 'cuda':
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if device == "cuda":
         torch.cuda.empty_cache()
 
-    if args.sub_command == 'predict_and_show':
-        model = load_model()
-        image, gt = None, None
-        back_projector = None
-        if args.random_image:
-            image, gt = get_random_image_and_gt(TRAIN_X_DIR, TRAIN_Y_DIR)
+    # if args.sub_command == "predict_and_show":
+    #     model = load_model()
+    #     image, gt = None, None
+    #     back_projector = None
+    #     if args.random_image:
+    #         image, gt = get_random_image_and_gt(TEST_X_DIR, TEST_Y_DIR)
 
-        elif args.image_path and args.gt_path:
-            image = itk.imread(args.image_path)
-            gt = itk.imread(args.gt_path)
+    #     elif args.image_path and args.gt_path:
+    #         image = itk.imread(args.image_path)
+    #         gt = itk.imread(args.gt_path)
 
-        else:
-            raise RuntimeError(
-                'Please specify either --random_image or --image_path and --gt_path'
-            )
+    #     else:
+    #         raise RuntimeError(
+    #             "Please specify either --random_image or --image_path and --gt_path"
+    #         )
 
-        if args.show_iradon:
-            back_projector = back_project_iradon
-        val_loader = get_data_loader(
-            VAL_X_DIR,
-            VAL_Y_DIR,
-            xtransforms=val_x_transforms,
-            ytransforms=val_y_transforms,
-        )
-        predict_image_and_show(model, val_loader, device, gt, back_projector=back_projector)
+    #     if args.show_iradon:
+    #         back_projector = back_project_iradon
 
-    if args.sub_command == 'train':
+    if args.sub_command == "train":
         model = get_model()
         train_loader = get_data_loader(
             TRAIN_X_DIR,
@@ -438,7 +508,6 @@ def main():
             TRAIN_MASK_DIR,
             xtransforms=train_x_transforms,
             ytransforms=train_y_transforms,
-            ztransforms=train_mask_transforms
         )
         val_loader = get_data_loader(
             VAL_X_DIR,
@@ -446,7 +515,6 @@ def main():
             VAL_MASK_DIR,
             xtransforms=val_x_transforms,
             ytransforms=val_y_transforms,
-            ztransforms=val_mask_tranforms
         )
         val_losses = train_model(model, train_loader, val_loader, device)
         print(val_losses)
@@ -461,6 +529,13 @@ def main():
         )
 
         test_model(model, test_loader, device)
+
+    if args.sub_command == "predict_and_write":
+        model = load_model()
+        files = get_filepaths_matching_pattern(args.file_patterns, recursive=True)
+        if not args.save_path.exists():
+            args.save_path.mkdir()
+        predict_and_write_to_disk(model, files, args.save_path, device, args.keep_file_structure)
 
 
 if __name__ == '__main__':

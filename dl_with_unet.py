@@ -32,10 +32,10 @@ from monai.handlers import (
 from torch import optim, nn
 
 NETWORK_INPUT_SIZE = (256, 256)
-NUM_EPOCHS = 200
+NUM_EPOCHS = 10
 
 # This is part of the API, main.py relies on a default number of epochs
-BATCH_SIZE = 16
+BATCH_SIZE = 8
 
 BEST_MODEL_NAME = "best_model.pt"
 MODEL_SAVE_DIR = Path("./models")
@@ -53,7 +53,6 @@ train_x_transforms = Compose(
         # Resize(NETWORK_INPUT_SHAPE, mode="nearest"),
         # # RandZoom(prob=0.5, min_zoom=0.9, max_zoom=1.3, mode="nearest"), # TODO: Make sure we dont center zoom at cut out the top. Uncomment
         ScaleIntensity(),
-        RandFlip(prob=0.5, spatial_axis=1),
     ]
 )
 train_y_transforms = Compose(
@@ -65,7 +64,6 @@ train_y_transforms = Compose(
         # Resize(NETWORK_INPUT_SHAPE, mode="nearest"),
         # # RandZoom(prob=0.5, min_zoom=0.9, max_zoom=1.3, mode="nearest"), # TODO: Make sure we dont center zoom at cut out the top. Uncomment
         ScaleIntensity(),
-        RandFlip(prob=0.5, spatial_axis=1),
     ]
 )
 val_x_transforms = Compose(
@@ -277,9 +275,9 @@ def train_model(
         batch_sizes.clear()
 
         # fetch and report the validation metrics
-        mse = evaluator.state.metrics["MAE"]
-        metric_values.append(mse)
-        print(f"evaluation for epoch {engine.state.epoch},  MAE = {mse:.4f}")
+        mae = evaluator.state.metrics["MAE"]
+        metric_values.append(mae)
+        print(f"evaluation for epoch {engine.state.epoch},  MAE = {mae:.4f}")
 
     trainer.run()
 
