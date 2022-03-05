@@ -1,11 +1,9 @@
-import itertools
 import torch
 import itk
 import numpy as np
 import os
 import sys
-import segmentation_models_pytorch as smp
-from tqdm import tqdm
+import matplotlib.pyplot as plt
 
 from . import model
 
@@ -53,11 +51,13 @@ NETWORK_INPUT_SIZE = (256, 256)
 NUM_EPOCHS = 50
 
 # This is part of the API, main.py relies on a default number of epochs
-BATCH_SIZE = 16
+BATCH_SIZE = 1
 
 BEST_MODEL_NAME = "best_model.pt"
 MODEL_SAVE_DIR = Path("./models")
 BEST_MODEL_PATH = MODEL_SAVE_DIR / BEST_MODEL_NAME
+
+ORIGINAL_IMAGE_SHAPE = (195, 1848)
 
 
 # All of the transforms are part of the API, except itk_image_to_model_input.
@@ -69,7 +69,7 @@ train_x_transforms = Compose(
         AddChannel(),
         Resize(NETWORK_INPUT_SIZE),
         ScaleIntensity(),
-        RandFlip(prob=0.5, spatial_axis=1),
+        # RandFlip(prob=0.5, spatial_axis=1),
     ]
 )
 
@@ -80,7 +80,7 @@ train_y_transforms = Compose(
         AddChannel(),
         Resize(NETWORK_INPUT_SIZE),
         ScaleIntensity(),
-        RandFlip(prob=0.5, spatial_axis=1),
+        # RandFlip(prob=0.5, spatial_axis=1),
     ]
 )
 
@@ -90,7 +90,7 @@ train_mask_transforms = Compose(
         EnsureType(),
         AddChannel(),
         Resize(NETWORK_INPUT_SIZE),
-        RandFlip(prob=0.5, spatial_axis=1),
+        # RandFlip(prob=0.5, spatial_axis=1),
     ]
 )
 
@@ -237,6 +237,40 @@ def _transform_batch(x):
         labels.append(d["label"])
     return preds, labels
 
+# TODO: Make more idiomatic
+def _get_hardcoded_mask(original_image_shape=ORIGINAL_IMAGE_SHAPE):
+    # Note, this is hardcoded based on where the images are zero in
+    # the data we've received
+    # Columns from 596-636 and 1212-1252 get set to 1
+    cg1 = slice(596, 636)
+    cg2 = slice(1212, 1252)
+
+    # The following rows also need to be set to 1
+    rg1 = slice(0, 10)
+    rg2 = slice(55, 75)
+    rg3 = slice(120, 140)
+    rg4 = slice(185, 195)
+
+    ret = np.zeros(original_image_shape)
+    # Setting the necessary rows to 1
+    ret[..., cg1] = 1
+    ret[..., cg2] = 1
+
+    # Setting the necessary columns to 1
+    ret[..., rg1, :] = 1
+    ret[..., rg2, :] = 1
+    ret[..., rg3, :] = 1
+    ret[..., rg4, :] = 1
+
+    t = Compose(
+        [
+            AddChannel(),
+            Resize(NETWORK_INPUT_SIZE),
+            EnsureType(),
+        ]
+    )
+    return t(ret)
+
 def train_model(
     model,
     train_loader,
@@ -249,15 +283,17 @@ def train_model(
     Should train model and save best model to a known path.
     Returns the validation losses
     '''
-    train_gen = iter(train_loader)
     model.to(device)
     model.train()
     lowest = 1E50
     optimizer = optim.Adam(model.parameters(), lr=0.03)
+    # Re-use the same mask over and over.
+    mask = _get_hardcoded_mask()
+    mask = np.repeat(mask[np.newaxis, :, :, :], train_loader.batch_size, axis=0)
     for epoch in range(num_epochs):
         model.train()
-        for imset in train_gen:
-            im, gt, mask = imset
+        for i, imset in enumerate(train_loader):
+            im, gt = imset
             im, gt, mask = im.to(device), gt.to(device), mask.to(device)
             out = model(im, mask)
             tot_loss, vgg_loss, style_loss = loss_function(out, gt)
