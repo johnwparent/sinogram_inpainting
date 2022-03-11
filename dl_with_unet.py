@@ -3,6 +3,7 @@ import torch
 import itk
 import util
 import numpy as np
+import os
 
 from pathlib import Path
 from monai.transforms import (
@@ -179,9 +180,8 @@ def run_inference(model, input_image: itk.Image, device):
     )
 
     prediction = transform(prediction.squeeze(0)).squeeze(0)
-    prediction_image = util.image_from_array(prediction, reference_image=input_image)
 
-    return prediction_image
+    return prediction
 
 def _transform_batch(x):
     preds = []
@@ -190,6 +190,63 @@ def _transform_batch(x):
         preds.append((d["pred"]))
         labels.append(d["label"])
     return preds, labels
+
+ORIGINAL_IMAGE_SHAPE = (195, 1848)
+
+# TODO: Make more idiomatic
+def get_hardcoded_mask(original_image_shape=ORIGINAL_IMAGE_SHAPE, reshape=True):
+    # Note, this is hardcoded based on where the images are zero in
+    # the data we've received
+    # Columns from 597-636 and 1213-1252 get set to 1
+    cg1 = slice(597, 636)
+    cg2 = slice(1213, 1252)
+
+    # The following rows also need to be set to 1
+    rg1 = slice(1, 10)
+    rg2 = slice(66, 75)
+    rg3 = slice(121, 130)
+    rg4 = slice(131, 140)
+    rg5 = slice(186, 195)
+
+    ret = np.zeros(original_image_shape)
+    # Setting the necessary rows to 1
+    ret[..., cg1] = 1
+    ret[..., cg2] = 1
+
+    # Setting the necessary columns to 1
+    ret[..., rg1, :] = 1
+    ret[..., rg2, :] = 1
+    ret[..., rg3, :] = 1
+    ret[..., rg4, :] = 1
+    ret[..., rg5, :] = 1
+
+    if reshape:
+        t = Compose(
+            [
+                AddChannel(),
+                Resize(NETWORK_INPUT_SIZE),
+                EnsureType(),
+            ]
+        )
+    else:
+        t = Compose(
+            [
+                AddChannel(),
+                EnsureType()
+            ]
+        )
+    return t(ret)
+
+
+def app_mask(mask, *args):
+    """
+    Apply derived mask to provided args
+    """
+    if not args:
+        raise RuntimeError("Incorrect Usgage, requires tensors to mask")
+
+    return (x * mask for x in args) if len(args) > 1 else args[0] * mask
+
 
 def train_model(
     model,
@@ -204,84 +261,139 @@ def train_model(
     Returns the validation losses
     '''
     model.to(device)
-    # TODO: Keep track of the cumulative loss.
-    optimizer = optim.Adam(model.parameters())
-    metric_values = []
-    iter_losses = []
-    batch_sizes = []
-    epoch_loss_values = []
+    model.train()
+    lowest = 1E50
+    optimizer = optim.Adam(model.parameters(), lr=0.03)
+    # Re-use the same mask over and over.
+    mask = get_hardcoded_mask()
+    def create_mask(mask, sz):
+        mask = np.repeat(mask[np.newaxis, :, :, :], sz, axis=0)
+        mask = mask.to(device)
+        return mask
 
-    steps_per_epoch = len(train_loader.dataset) // train_loader.batch_size
-    if len(train_loader.dataset) % train_loader.batch_size != 0:
-        steps_per_epoch += 1
+    for epoch in range(num_epochs):
+        model.train()
+        for i, imset in enumerate(train_loader):
+            im, gt = imset
+            im, gt = im.to(device), gt.to(device)
+            out = model(im)
+            gt, out = app_mask(create_mask(mask, gt.size()[0]), gt, out)
+            loss = loss_function(out, gt)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+        print(f"[training] trained epoch: {epoch}")
+        model.eval()
+
+        total_loss = 0
+        for imset in val_loader:
+            im, gt = imset
+            im, gt = im.to(device), gt.to(device)
+            out = model(im)
+            gt, out = app_mask(create_mask(mask, gt.size()[0]), gt, out)
+            tot_loss = loss_function(out, gt)
+            total_loss += float(tot_loss.detach().cpu())
+        print(f"[validation] Total Loss val: {total_loss}")
+
+        if total_loss < lowest:
+            print("[EPOCH {}] Lowest loss {} found".format(epoch, total_loss))
+            torch.save(model.state_dict(),  os.path.join(os.getcwd(), 'models', 'ckpt', '{}.pt'.format(epoch)))
+            lowest = total_loss
+        else:
+            print("[EPOCH {}] loss is {}".format(epoch, total_loss))
 
 
-    def prepare_batch(batchdata, device, non_blocking):
-        imgs, masks = batchdata
-        return imgs.to(device), masks.to(device)
+# def train_model(
+#     model,
+#     train_loader,
+#     val_loader,
+#     device,
+#     num_epochs=NUM_EPOCHS,
+#     loss_function=nn.L1Loss(),
+# ):
+#     '''
+#     Should train model and save best model to a known path.
+#     Returns the validation losses
+#     '''
+#     model.to(device)
+#     # TODO: Keep track of the cumulative loss.
+#     optimizer = optim.Adam(model.parameters())
+#     metric_values = []
+#     iter_losses = []
+#     batch_sizes = []
+#     epoch_loss_values = []
 
-    key_val_metric = {"MAE": MeanAbsoluteError(output_transform=_transform_batch)}
-    MODEL_SAVE_DIR.mkdir(parents=True, exist_ok=True)
-    checkpoint_saver = CheckpointSaver(
-        save_dir=MODEL_SAVE_DIR,
-        save_dict={"model": model},
-        save_key_metric=True,
-        key_metric_negative_sign=True,
-        key_metric_filename=BEST_MODEL_NAME,
-    )
+#     steps_per_epoch = len(train_loader.dataset) // train_loader.batch_size
+#     if len(train_loader.dataset) % train_loader.batch_size != 0:
+#         steps_per_epoch += 1
 
-    evaluator = SupervisedEvaluator(
-        device=device,
-        val_data_loader=val_loader,
-        network=model,
-        key_val_metric=key_val_metric,
-        prepare_batch=prepare_batch,
-        val_handlers=[checkpoint_saver],
-    )
 
-    trainer = SupervisedTrainer(
-        device=device,
-        max_epochs=num_epochs,
-        train_data_loader=train_loader,
-        network=model,
-        optimizer=optimizer,
-        loss_function=loss_function,
-        train_handlers=[ValidationHandler(1, evaluator)],
-        prepare_batch=prepare_batch,
-    )
+#     def prepare_batch(batchdata, device, non_blocking):
+#         imgs, masks = batchdata
+#         return imgs.to(device), masks.to(device)
 
-    @trainer.on(Events.ITERATION_COMPLETED)
-    def _end_iter(engine):
-        loss = np.average([o["loss"] for o in engine.state.output])
-        iter_losses.append(loss)
-        epoch = engine.state.epoch
-        epoch_len = engine.state.max_epochs
-        step = (engine.state.iteration % steps_per_epoch) + 1
-        batch_len = len(engine.state.batch[0])
-        batch_sizes.append(batch_len)
+#     key_val_metric = {"MAE": MeanAbsoluteError(output_transform=_transform_batch)}
+#     MODEL_SAVE_DIR.mkdir(parents=True, exist_ok=True)
+#     checkpoint_saver = CheckpointSaver(
+#         save_dir=MODEL_SAVE_DIR,
+#         save_dict={"model": model},
+#         save_key_metric=True,
+#         key_metric_negative_sign=True,
+#         key_metric_filename=BEST_MODEL_NAME,
+#     )
 
-        if step % 5 == 0:
-            print(
-                f"epoch {epoch}/{epoch_len}, step {step}/{steps_per_epoch}, training_loss = {loss:.4f}"
-            )
+#     evaluator = SupervisedEvaluator(
+#         device=device,
+#         val_data_loader=val_loader,
+#         network=model,
+#         key_val_metric=key_val_metric,
+#         prepare_batch=prepare_batch,
+#         val_handlers=[checkpoint_saver],
+#     )
 
-    @trainer.on(Events.EPOCH_COMPLETED)
-    def run_validation(engine):
-        overall_average_loss = np.average(iter_losses, weights=batch_sizes)
-        epoch_loss_values.append(overall_average_loss)
+#     trainer = SupervisedTrainer(
+#         device=device,
+#         max_epochs=num_epochs,
+#         train_data_loader=train_loader,
+#         network=model,
+#         optimizer=optimizer,
+#         loss_function=loss_function,
+#         train_handlers=[ValidationHandler(1, evaluator)],
+#         prepare_batch=prepare_batch,
+#     )
 
-        # clear the contents of iter_losses and batch_sizes for the next epoch
-        iter_losses.clear()
-        batch_sizes.clear()
+#     @trainer.on(Events.ITERATION_COMPLETED)
+#     def _end_iter(engine):
+#         loss = np.average([o["loss"] for o in engine.state.output])
+#         iter_losses.append(loss)
+#         epoch = engine.state.epoch
+#         epoch_len = engine.state.max_epochs
+#         step = (engine.state.iteration % steps_per_epoch) + 1
+#         batch_len = len(engine.state.batch[0])
+#         batch_sizes.append(batch_len)
 
-        # fetch and report the validation metrics
-        mae = evaluator.state.metrics["MAE"]
-        metric_values.append(mae)
-        print(f"evaluation for epoch {engine.state.epoch},  MAE = {mae:.4f}")
+#         if step % 5 == 0:
+#             print(
+#                 f"epoch {epoch}/{epoch_len}, step {step}/{steps_per_epoch}, training_loss = {loss:.4f}"
+#             )
 
-    trainer.run()
+#     @trainer.on(Events.EPOCH_COMPLETED)
+#     def run_validation(engine):
+#         overall_average_loss = np.average(iter_losses, weights=batch_sizes)
+#         epoch_loss_values.append(overall_average_loss)
 
-    return metric_values
+#         # clear the contents of iter_losses and batch_sizes for the next epoch
+#         iter_losses.clear()
+#         batch_sizes.clear()
+
+#         # fetch and report the validation metrics
+#         mae = evaluator.state.metrics["MAE"]
+#         metric_values.append(mae)
+#         print(f"evaluation for epoch {engine.state.epoch},  MAE = {mae:.4f}")
+
+#     trainer.run()
+
+#     return metric_values
 
 
 def test_model(model, test_loader, device):

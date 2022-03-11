@@ -241,15 +241,16 @@ def _transform_batch(x):
 def _get_hardcoded_mask(original_image_shape=ORIGINAL_IMAGE_SHAPE):
     # Note, this is hardcoded based on where the images are zero in
     # the data we've received
-    # Columns from 596-636 and 1212-1252 get set to 1
-    cg1 = slice(596, 636)
-    cg2 = slice(1212, 1252)
+    # Columns from 597-636 and 1213-1252 get set to 1
+    cg1 = slice(597, 636)
+    cg2 = slice(1213, 1252)
 
     # The following rows also need to be set to 1
-    rg1 = slice(0, 10)
-    rg2 = slice(55, 75)
-    rg3 = slice(120, 140)
-    rg4 = slice(185, 195)
+    rg1 = slice(1, 10)
+    rg2 = slice(66, 75)
+    rg3 = slice(121, 130)
+    rg4 = slice(131, 140)
+    rg5 = slice(186, 195)
 
     ret = np.zeros(original_image_shape)
     # Setting the necessary rows to 1
@@ -261,6 +262,7 @@ def _get_hardcoded_mask(original_image_shape=ORIGINAL_IMAGE_SHAPE):
     ret[..., rg2, :] = 1
     ret[..., rg3, :] = 1
     ret[..., rg4, :] = 1
+    ret[..., rg5, :] = 1
 
     t = Compose(
         [

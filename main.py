@@ -25,7 +25,8 @@ from monai.data import partition_dataset
 from pathlib import Path
 
 from monai.data import ArrayDataset, DataLoader
-from pcon_unet.train import *
+# from pcon_unet.train import *
+from dl_with_unet import *
 from skimage import exposure
 
 from monai.transforms import ScaleIntensity
@@ -117,7 +118,12 @@ def _construct_parser():
 
     sub_parser_predict_and_write = sub_parsers.add_parser("predict_and_write")
     sub_parser_predict_and_write.add_argument(
-        "--file_patterns",
+        "--file_patternsx",
+        nargs="+",
+        action="store",
+    )
+    sub_parser_predict_and_write.add_argument(
+        "--file_patternsy",
         nargs="+",
         action="store",
     )
@@ -264,6 +270,15 @@ def display_image_truth_and_prediction(
 
     _display_images_in_grid(images_to_display, grid_shape, titles)
 
+def app_mask(mask, *args, fill=0, check=0):
+    """
+    Apply derived mask to provided args
+    """
+    if not args:
+        raise RuntimeError("Incorrect Usgage, requires tensors to mask")
+
+    return (x.masked_fill(mask == check, fill) for x in args) if len(args) > 1 else args[0].masked_fill(mask == 0, fill)
+
 # TODO: Make this modular so gt is not required
 def predict_image_and_show(
     model,
@@ -273,24 +288,51 @@ def predict_image_and_show(
     eval_metric=monai.metrics.MSEMetric(),
     back_projector=None,
 ):
-
+    import torchvision.transforms as transforms
+    transform = transforms.ToTensor()
     prediction = run_inference(model, image, device)
+    import pdb; pdb.set_trace()
+
+    prediction = app_mask(get_hardcoded_mask(reshape=False), transform(prediction))
+    pred_base = app_mask(get_hardcoded_mask(reshape=False), transform(_convert_to_array_if_itk_image(image)), check=1)
+    prediction = prediction + pred_base
+    prediction_image = util.image_from_array(prediction.cpu().detach().numpy())
     # Display
     display_image_truth_and_prediction(
-        image, gt, prediction, eval_metric, back_projector
+        image, gt, prediction_image, eval_metric, back_projector
     )
 
 
-def predict_and_write_to_disk(model, filepaths, save_path_root, device, keep_file_structure=True):
+def predict_and_write_to_disk(model, filepaths, filesy, save_path_root, device, keep_file_structure=True):
     # TODO: licensing here
+    itk_image_to_model_input = Compose(
+        [
+            EnsureType(data_type="tensor"),
+            AddChannel(),
+            ScaleIntensity(),
+            AddChannel(),
+            EnsureType(),
+        ]
+    )
     commonpath = None
     if keep_file_structure and len(filepaths) > 1:
         commonpath = os.path.commonpath(filepaths)
 
-    for fp in filepaths:
+    for fp, fy in zip(filepaths, filesy):
         fp = Path(fp)
         im = itk.imread(str(fp))
+        imy = itk.imread(str(fy))
         inpainted = run_inference(model, im, device)
+        import torchvision.transforms as transforms
+        from torchvision.utils import save_image
+        transform = transforms.ToTensor()
+        inpainted = transform(inpainted)
+        mask = get_hardcoded_mask(reshape=False)
+        inpainted_m = mask * inpainted
+        inv_mask = 1 - mask
+        imy_missing_bars = itk_image_to_model_input(imy) * inv_mask
+        inpainted = inpainted_m + imy_missing_bars
+
         # TODO: licensing here
         save_path = save_path_root
         if commonpath is not None:
@@ -299,7 +341,8 @@ def predict_and_write_to_disk(model, filepaths, save_path_root, device, keep_fil
 
         save_path /= fp.name
         print("Writing inpainted sinogram for", fp.name, "to", save_path)
-        itk.imwrite(inpainted, str(save_path))
+        save_image(inpainted, str(save_path))
+        # itk.imwrite(inpainted, str(save_path))
 
 
 def get_random_image_and_gt(image_dir, gt_dir):
@@ -338,23 +381,23 @@ def main():
     if device == "cuda":
         torch.cuda.empty_cache()
 
-    # if args.sub_command == "predict_and_show":
-    #     model = load_model()
-    #     image, gt = None, None
-    #     back_projector = None
-    #     if args.random_image:
-    #         image, gt = get_random_image_and_gt(TEST_X_DIR, TEST_Y_DIR)
+    if args.sub_command == "predict_and_show":
+        model = load_model()
+        image, gt = None, None
+        back_projector = None
+        if args.random_image:
+            image, gt = get_random_image_and_gt(TEST_X_DIR, TEST_Y_DIR)
 
-    #     elif args.image_path and args.gt_path:
-    #         image = itk.imread(args.image_path)
-    #         gt = itk.imread(args.gt_path)
+        elif args.image_path and args.gt_path:
+            image = itk.imread(args.image_path)
+            gt = itk.imread(args.gt_path)
 
-    #     else:
-    #         raise RuntimeError(
-    #             "Please specify either --random_image or --image_path and --gt_path"
-    #         )
+        else:
+            raise RuntimeError(
+                "Please specify either --random_image or --image_path and --gt_path"
+            )
 
-    #     predict_image_and_show(model, image, device, gt, back_projector=back_projector)
+        predict_image_and_show(model, image, device, gt, back_projector=back_projector)
 
     if args.sub_command == "train":
         model = get_model()
@@ -386,10 +429,11 @@ def main():
 
     if args.sub_command == "predict_and_write":
         model = load_model()
-        files = get_filepaths_matching_pattern(args.file_patterns, recursive=True)
+        files = get_filepaths_matching_pattern(args.file_patternsx, recursive=True)
+        filesy = get_filepaths_matching_pattern(args.file_patternsy, recursive=True)
         if not args.save_path.exists():
             args.save_path.mkdir()
-        predict_and_write_to_disk(model, files, args.save_path, device, args.keep_file_structure)
+        predict_and_write_to_disk(model, files, filesy, args.save_path, device, args.keep_file_structure)
 
 
 if __name__ == "__main__":
