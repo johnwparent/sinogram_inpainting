@@ -290,11 +290,12 @@ def train_model(
     # Re-use the same mask over and over.
     mask = _get_hardcoded_mask()
     mask = np.repeat(mask[np.newaxis, :, :, :], train_loader.batch_size, axis=0)
+    mask = mask.to(device)
     for epoch in range(num_epochs):
         model.train()
         for i, imset in enumerate(train_loader):
             im, gt = imset
-            im, gt, mask = im.to(device), gt.to(device), mask.to(device)
+            im, gt = im.to(device), gt.to(device)
             out = model(im, mask)
             tot_loss, vgg_loss, style_loss = loss_function(out, gt)
             optimizer.zero_grad()
@@ -305,8 +306,8 @@ def train_model(
 
         total_loss = 0
         for imset in val_loader:
-            im, gt, mask = imset
-            im, gt, mask = im.to(device), gt.to(device), mask.to(device)
+            im, gt = imset
+            im, gt = im.to(device), gt.to(device)
             out = model(im, mask)
             tot_loss, vgg_loss, style_loss = loss_function(out, gt)
             total_loss += float(tot_loss.detach().cpu())

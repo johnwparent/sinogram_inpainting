@@ -15,17 +15,17 @@ class UNetPconv(nn.Module):
         self.l1 = PCONVLayer(1, 64)
         self.l3 = PCONVLayer(64, 128)
         self.l4 = PCONVLayer(128, 256)
-        self.l5 = PCONVLayer(256, 512)      # Encoding Section
-        self.l6 = PCONVLayer(512, 512)
-        self.l7 = PCONVLayer(512, 512)
-        self.l8 = PCONVLayer(512, 512)
-        self.l9 = PCONVLayer(512, 512)
+        # self.l5 = PCONVLayer(256, 512)      # Encoding Section
+        # self.l6 = PCONVLayer(512, 512)
+        # self.l7 = PCONVLayer(512, 512)
+        # self.l8 = PCONVLayer(512, 512)
+        # self.l9 = PCONVLayer(512, 512)
 
-        self.l10 = PCONVLayer(2 * 512, 512, mc=True)
-        self.l11 = PCONVLayer(2 * 512, 512, mc=True)
-        self.l12 = PCONVLayer(2 * 512, 512, mc=True)
-        self.l13 = PCONVLayer(2 * 512, 512, mc=True)
-        self.l14 = PCONVLayer(512 + 256, 256, mc=True)     # Decoding Section
+        # self.l10 = PCONVLayer(2 * 512, 512, mc=True)
+        # self.l11 = PCONVLayer(2 * 512, 512, mc=True)
+        # self.l12 = PCONVLayer(2 * 512, 512, mc=True)
+        # self.l13 = PCONVLayer(2 * 512, 512, mc=True)
+        # self.l14 = PCONVLayer(512 + 256, 256, mc=True)     # Decoding Section
         self.l15 = PCONVLayer(256 + 128, 128, mc=True)
         self.l16 = PCONVLayer(128 + 64, 64, mc=True)
         self.l17 = PCONVLayer(64 + 1, 1, mc=True, bn=False)
@@ -34,11 +34,11 @@ class UNetPconv(nn.Module):
         x1, m1 = self.l1(x, mask)
         x3, m3 = self.l3(x1, m1)
         x4, m4 = self.l4(x3, m3)
-        x5, m5 = self.l5(x4, m4)
-        x6, m6 = self.l6(x5, m5)
-        x7, m7 = self.l7(x6, m6)
-        x8, m8 = self.l8(x7, m7)
-        x9, m9 = self.l9(x8, m8)
+        # x5, m5 = self.l5(x4, m4)
+        # x6, m6 = self.l6(x5, m5)
+        # x7, m7 = self.l7(x6, m6)
+        # x8, m8 = self.l8(x7, m7)
+        # x9, m9 = self.l9(x8, m8)
 
         def tcat(m1, m2):
             return torch.cat([F.interpolate(m1, m2.shape[2:]), m2], dim=1)
@@ -49,12 +49,12 @@ class UNetPconv(nn.Module):
                               m1[:,1].unsqueeze(1).repeat(1, sout, 1, 1)],
                              dim=1)
 
-        x10, m10 = self.l10(tcat(x9, x8),  trep(tcat(m9, m8), 512, 512))
-        x11, m11 = self.l11(tcat(x10, x7), trep(tcat(m10, m7), 512, 512))
-        x12, m12 = self.l12(tcat(x11, x6), trep(tcat(m11, m6), 512, 512))
-        x13, m13 = self.l13(tcat(x12, x5), trep(tcat(m12, m5), 512, 512))
-        x14, m14 = self.l14(tcat(x13, x4), trep(tcat(m13, m4), 512, 256))
-        x15, m15 = self.l15(tcat(x14, x3), trep(tcat(m14, m3), 256, 128))
+        # x10, m10 = self.l10(tcat(x9, x8),  trep(tcat(m9, m8), 512, 512))
+        # x11, m11 = self.l11(tcat(x10, x7), trep(tcat(m10, m7), 512, 512))
+        # x12, m12 = self.l12(tcat(x11, x6), trep(tcat(m11, m6), 512, 512))
+        # x13, m13 = self.l13(tcat(x6, x5), trep(tcat(m6, m5), 512, 512))
+        # x14, m14 = self.l14(tcat(x13, x4), trep(tcat(m13, m4), 512, 256))
+        x15, m15 = self.l15(tcat(x4, x3), trep(tcat(m4, m3), 256, 128))
         x16, m16 = self.l16(tcat(x15, x1), trep(tcat(m15, m1), 128, 64))
         out, _   = self.l17(tcat(x16, x),  trep(tcat(m16, mask), 64, 1))
 
