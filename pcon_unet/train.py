@@ -290,6 +290,7 @@ def train_model(
     # Re-use the same mask over and over.
     mask = _get_hardcoded_mask()
     mask = np.repeat(mask[np.newaxis, :, :, :], train_loader.batch_size, axis=0)
+    mask = mask.type(torch.cuda.FloatTensor)
     mask = mask.to(device)
     for epoch in range(num_epochs):
         model.train()
