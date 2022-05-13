@@ -67,9 +67,6 @@ train_x_transforms = Compose(
         LoadImage(image_only=True),
         EnsureType(),
         AddChannel(),
-        Resize(NETWORK_INPUT_SIZE),
-        ScaleIntensity(),
-        # RandFlip(prob=0.5, spatial_axis=1),
     ]
 )
 
@@ -78,9 +75,8 @@ train_y_transforms = Compose(
         LoadImage(image_only=True),
         EnsureType(),
         AddChannel(),
-        Resize(NETWORK_INPUT_SIZE),
-        ScaleIntensity(),
-        # RandFlip(prob=0.5, spatial_axis=1),
+        ScaleIntensity(-1000, 2000),
+        # (-1024, 4096)
     ]
 )
 
@@ -90,7 +86,6 @@ train_mask_transforms = Compose(
         EnsureType(),
         AddChannel(),
         Resize(NETWORK_INPUT_SIZE),
-        # RandFlip(prob=0.5, spatial_axis=1),
     ]
 )
 
@@ -99,8 +94,6 @@ val_x_transforms = Compose(
         LoadImage(image_only=True),
         EnsureType(),
         AddChannel(),
-        Resize(NETWORK_INPUT_SIZE),
-        ScaleIntensity(),
     ]
 )
 
@@ -109,8 +102,6 @@ val_y_transforms = Compose(
         LoadImage(image_only=True),
         EnsureType(),
         AddChannel(),
-        Resize(NETWORK_INPUT_SIZE),
-        ScaleIntensity(),
     ]
 )
 
@@ -129,8 +120,7 @@ test_x_transforms = Compose(
         EnsureType(),
         AddChannel(),
         Resize(NETWORK_INPUT_SIZE),
-        ScaleIntensity(),
-    ]
+            ]
 )
 
 test_y_transforms = Compose(
