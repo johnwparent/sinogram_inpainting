@@ -17,7 +17,7 @@ from typing import Tuple
 
 testIs = None
 
-data_size = 2000
+data_size = 20
 
 
 def upscale_to_nearest(val, mul):
@@ -27,7 +27,7 @@ input_shape = (upscale_to_nearest(256, 256),
                upscale_to_nearest(256, 256))
 
 def load_data(dir, Is):
-    ims = glob.glob(dir)[:2000]
+    ims = glob.glob(dir)[:data_size]
     for d in ims:
         i = np.array(Image.open(d))
         i = np.repeat(i[..., np.newaxis], 3, -1)
@@ -123,7 +123,7 @@ def trainer():
         perceptual_Is = layers_loss_model.predict(sample) + [sample]
         loss.append(full_model.fit([sample, mask], perceptual_Is, epochs=1,
                                    batch_size=8,
-                                   validation_data=([test_Is, mask[:(data_size/2)]],
+                                   validation_data=([test_Is, mask[:data_size]],
                                                      validation_perceptual_Is))
                    )
 
