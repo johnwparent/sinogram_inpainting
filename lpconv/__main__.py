@@ -27,7 +27,7 @@ input_shape = (upscale_to_nearest(256, 256),
                upscale_to_nearest(256, 256))
 
 def load_data(dir, Is):
-    ims = glob.glob(dir)
+    ims = glob.glob(dir)[:2000]
     for d in ims:
         i = np.array(Image.open(d))
         i = np.repeat(i[..., np.newaxis], 3, -1)
@@ -71,7 +71,7 @@ full_model.compile(keras.optimizers.Adam(), ['mean_absolute_error'] * 7, loss_we
 
 
 def generate_mask(input_size: Tuple[int, int]):
-    mask = np.full((input_size[0], input_size[1], 1), 1, np.float32)
+    mask = np.full((input_size[0], input_size[1], 3), 1, np.float32)
     cg1 = slice(0,20)
     cg2 = slice(596, 636)
     cg3 = slice(1212, 1252)
