@@ -90,15 +90,15 @@ def nvidia_unet(patch_size, depth=3):
     mask = input_mask
     for shape, filters in zip([7, 5, 5, 3, 3, 3, 3, 3], [64, 128, 256, 512, 512, 512, 512, 512]):
         skips.append((output, mask))
-        print(output.shape)
         output, mask = partial_convolution(output, mask, filters, (shape, shape), 2,
                                            Activation("relu"))
         if shape != 7:
             output = BatchNormalization()(output)
     for shape, filters in zip([4, 4, 4, 4, 4, 4, 4, 4], [512, 512, 512, 512, 256, 128, 64, 3]):
+        skip_output, skip_mask = skips.pop()
         output = keras.layers.UpSampling2D()(output)
         mask = keras.layers.UpSampling2D()(mask)
-        skip_output, skip_mask = skips.pop()
+
         output = concatenate([output, skip_output], axis=3)
         mask = concatenate([mask, skip_mask], axis=3)
         

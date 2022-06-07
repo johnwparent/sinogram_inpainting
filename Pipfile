@@ -17,6 +17,7 @@ tqdm = "*"
 torchvision = "*"
 segmentation-models-pytorch = "*"
 monai = "==0.6.0"
+keras = "*"
 
 [dev-packages]
 

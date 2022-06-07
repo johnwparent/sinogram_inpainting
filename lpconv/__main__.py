@@ -1,10 +1,15 @@
 import os
+import glob
+import math
 import sys
 import numpy as np
 
-from network import unet, gram_matrix
+from PIL import Image
+
+from network.unet import gram_matrix, nvidia_unet
 
 import keras
+import tensorflow as tf
 
 from keras.models import Sequential, Model
 
@@ -15,13 +20,39 @@ testIs = None
 data_size = 2000
 
 
-model = unet.nvidia_unet(depth=1)
+def upscale_to_nearest(val, mul):
+    return mul * math.ceil(val / mul)
+
+input_shape = (upscale_to_nearest(1848, 256),
+               upscale_to_nearest(195, 256))
+
+def load_data(dir, Is):
+    ims = glob.glob(dir)
+    for d in ims:
+        i = np.array(Image.open(d))
+        i = np.repeat(i[..., np.newaxis], 3, -1)
+        Is.append(tf.image.resize(np.array(i), (input_shape)))
+
+test_data_dir = os.path.join(os.path.dirname(__file__), '../data/extracted_data/test/*/*.tiff')
+test_Is = []
+load_data(test_data_dir, test_Is)
+test_Is = np.array(test_Is)
+
+val_data_dir = os.path.join(os.path.name(__file__), '../data/extracted_data/val/*/*.tiff')
+val_Is = []
+load_data(val_data_dir, val_Is)
+val_Is = np.array(val_Is)
+
+model = nvidia_unet(input_shape)
 loss = []
 
-lossModel = keras.applications.vgg16.VGG16(include_top=False, weights='imagenet', input_shape=(256, 256, 1))
+# Load loss model
+lossModel = keras.applications.vgg16.VGG16(include_top=False, input_shape=(input_shape[0], input_shape[1], 3))
+
 
 for layer in lossModel.layers:
     layer.trainable=False
+
 
 selectedlayers = [3, 6, 10]
 
@@ -30,18 +61,17 @@ layers_loss_model = Model(lossModel.inputs, [lossModel.layers[idx].output for id
 
 lossModel.layers[1].output
 
-#validation_perceptual_Is = layers_loss_model.predict(test_Is * 256 - 127) + [test_Is]
 validation_perceptual_Is = layers_loss_model.predict(test_Is) + [test_Is]
 
-#loss_model_outputs = Lambda(lambda x: x * 256 - 127)(model.output)
 loss_model_outputs = layers_loss_model(model.output)
 
-full_model = Model(model.input, loss_model_outputs + model.outputs)
 
+full_model = Model(model.input, loss_model_outputs + model.outputs)
 full_model.compile(keras.optimizers.Adam(), ['mean_absolute_error'] * 7, loss_weights=[.05, .05, .05, 120, 120, 120, 9])
 
+
 def generate_mask(input_size: Tuple[int, int]):
-    mask = np.full((input_size[0], input_size[1], 1), 255, np.float32)
+    mask = np.full((input_size[0], input_size[1], 1), 1, np.float32)
     cg1 = slice(0,20)
     cg2 = slice(596, 636)
     cg3 = slice(1212, 1252)
@@ -60,18 +90,20 @@ def generate_mask(input_size: Tuple[int, int]):
     mask[rg2, :, :] = 0
     mask[rg3, :, :] = 0
     mask[rg4, :, :] = 0
-    mask/=255
-    return np.array([mask]* data_size)
+    return np.array([mask] * data_size)
 
+Is_data_dir = os.path.join(__file__, '../data/extracted_data/train/*/*.tiff')
 import sys
 import gc
 def trainer():
     gc.collect()
-    mask = generate_mask()
+    mask = generate_mask(input_shape)
 
+    Is = []
+    load_data(Is_data_dir, Is)
+    Is = np.array(Is)
 
     sample = Is
-    print("init")
     try:
         perceptual_Is = layers_loss_model.predict(sample) + [sample]
 
@@ -81,19 +113,14 @@ def trainer():
                    )
 
     finally:
-        print("del_start")
         print(sys.getrefcount(perceptual_Is[0]))
         del perceptual_Is
         gc.collect()
-        print("del end")
-
 
     sample = Is
-    print("init")
     try:
 
         perceptual_Is = layers_loss_model.predict(sample) + [sample]
-
         loss.append(full_model.fit([sample, mask], perceptual_Is, epochs=1,
                                    batch_size=8,
                                    validation_data=([test_Is, mask[:(data_size/2)]],
@@ -101,11 +128,8 @@ def trainer():
                    )
 
     finally:
-        print("del_start")
-        print(sys.getrefcount(perceptual_Is[0]))
         del perceptual_Is
         gc.collect()
-        print("del end")
         model.save("best_inpainter")
 
 import gc
