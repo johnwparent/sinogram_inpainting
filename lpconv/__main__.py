@@ -38,7 +38,7 @@ test_Is = []
 load_data(test_data_dir, test_Is)
 test_Is = np.array(test_Is)
 
-val_data_dir = os.path.join(os.path.name(__file__), '../data/extracted_data/val/*/*.tiff')
+val_data_dir = os.path.join(os.path.dirname(__file__), '../data/extracted_data/val/*/*.tiff')
 val_Is = []
 load_data(val_data_dir, val_Is)
 val_Is = np.array(val_Is)
@@ -92,7 +92,7 @@ def generate_mask(input_size: Tuple[int, int]):
     mask[rg4, :, :] = 0
     return np.array([mask] * data_size)
 
-Is_data_dir = os.path.join(__file__, '../data/extracted_data/train/*/*.tiff')
+Is_data_dir = os.path.join(os.path.dirname(__file__), '../data/extracted_data/train/*/*.tiff')
 import sys
 import gc
 def trainer():
