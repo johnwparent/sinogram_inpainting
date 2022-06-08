@@ -52,7 +52,7 @@ class ProgressiveLoader(object):
 test_Is = ProgressiveLoader(test_data_dir, slice=data_slice)
 test_Is_ims = test_Is.load_next_set()
 
-# val_data_dir = os.path.join(os.path.dirname(__file__), '../data/extracted_data/val/*/*.tiff')
+val_data_dir = os.path.join(os.path.dirname(__file__), '../data/extracted_data/val/*/*.tiff')
 # val_Is = []
 # load_data(val_data_dir, val_Is)
 # val_Is = np.array(val_Is)
@@ -143,7 +143,12 @@ def trainer():
 
 import gc
 perceptual_Is = []
-for _ in range(100):
-    trainer()
-model.save("best_inpainter")
-
+if sys.argv[1] == 'train':
+    for _ in range(100):
+        trainer()
+    model.save("best_inpainter")
+else:
+    model = tf.keras.models.load_model("best_inpainter")
+    eval_im = ProgressiveLoader(val_data_dir, slice=1)
+    ret = model.predict(eval_im.load_next_set())
+    import pdb; pdb.set_trace()
