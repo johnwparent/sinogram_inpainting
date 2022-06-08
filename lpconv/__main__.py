@@ -17,7 +17,7 @@ from keras.models import Sequential, Model
 from typing import Tuple
 
 
-data_slice = 10
+data_slice = sys.argv[1]
 
 
 def upscale_to_nearest(val, mul):
