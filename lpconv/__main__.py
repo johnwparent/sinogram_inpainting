@@ -38,16 +38,16 @@ test_Is = []
 load_data(test_data_dir, test_Is)
 test_Is = np.array(test_Is)
 
-val_data_dir = os.path.join(os.path.dirname(__file__), '../data/extracted_data/val/*/*.tiff')
-val_Is = []
-load_data(val_data_dir, val_Is)
-val_Is = np.array(val_Is)
+# val_data_dir = os.path.join(os.path.dirname(__file__), '../data/extracted_data/val/*/*.tiff')
+# val_Is = []
+# load_data(val_data_dir, val_Is)
+# val_Is = np.array(val_Is)
 
 model = nvidia_unet(input_shape)
 loss = []
 
 # Load loss model
-lossModel = keras.applications.vgg16.VGG16(weights = None, include_top=False, input_shape=(input_shape[0], input_shape[1], 3))
+lossModel = keras.applications.vgg16.VGG16(weights=None, include_top=False, input_shape=(input_shape[0], input_shape[1], 3))
 
 
 for layer in lossModel.layers:
