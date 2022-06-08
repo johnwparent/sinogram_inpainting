@@ -23,8 +23,8 @@ data_size = 200
 def upscale_to_nearest(val, mul):
     return mul * math.ceil(val / mul)
 
-input_shape = (upscale_to_nearest(256, 256),
-               upscale_to_nearest(256, 256))
+input_shape = (upscale_to_nearest(1848, 256),
+               upscale_to_nearest(195, 256))
 
 def load_data(dir, Is):
     ims = glob.glob(dir)[:data_size]
