@@ -31,7 +31,7 @@ input_shape = (upscale_to_nearest(1848, 256),
 test_data_dir = os.path.join(os.path.dirname(__file__), '../data/extracted_data/test/*/*.tiff')
 
 
-class ProgressiveLoader(list):
+class ProgressiveLoader(object):
     def __init__(self, data_root, slice=10):
         self.im_root = data_root
         self.set_slice = slice
@@ -132,7 +132,7 @@ def trainer():
         perceptual_Is = layers_loss_model.predict(sample2) + [sample2]
         loss.append(full_model.fit([sample2, mask], perceptual_Is, epochs=1,
                                    batch_size=8,
-                                   validation_data=([test_Is, mask],
+                                   validation_data=([test_Is.load_next_set(), mask],
                                                      validation_perceptual_Is))
                    )
     finally:
