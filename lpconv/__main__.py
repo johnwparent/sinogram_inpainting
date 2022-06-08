@@ -62,7 +62,7 @@ model = nvidia_unet(input_shape)
 loss = []
 
 # Load loss model
-lossModel = keras.applications.vgg16.VGG16(weights=None, include_top=False, input_shape=(input_shape[0], input_shape[1], 3))
+lossModel = keras.applications.vgg16.VGG16(include_top=False, input_shape=(input_shape[0], input_shape[1], 3))
 
 for layer in lossModel.layers:
     layer.trainable=False
