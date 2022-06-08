@@ -17,7 +17,7 @@ from typing import Tuple
 
 testIs = None
 
-data_size = 20
+data_size = 200
 
 
 def upscale_to_nearest(val, mul):
@@ -47,7 +47,7 @@ model = nvidia_unet(input_shape)
 loss = []
 
 # Load loss model
-lossModel = keras.applications.vgg16.VGG16(include_top=False, input_shape=(input_shape[0], input_shape[1], 3))
+lossModel = keras.applications.vgg16.VGG16(weights = None, include_top=False, input_shape=(input_shape[0], input_shape[1], 3))
 
 
 for layer in lossModel.layers:
