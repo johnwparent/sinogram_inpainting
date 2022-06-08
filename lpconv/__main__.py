@@ -150,5 +150,5 @@ if sys.argv[1] == 'train':
 else:
     model = tf.keras.models.load_model("best_inpainter")
     eval_im = ProgressiveLoader(val_data_dir, slice=1)
-    ret = model.predict(eval_im.load_next_set())
+    ret = model.predict([eval_im.load_next_set(), generate_mask(input_shape)[0]])
     import pdb; pdb.set_trace()
