@@ -1,4 +1,5 @@
 import os
+import gc
 import glob
 import math
 import sys
@@ -15,28 +16,41 @@ from keras.models import Sequential, Model
 
 from typing import Tuple
 
-testIs = None
 
-data_size = 20
+data_slice = 10
 
 
 def upscale_to_nearest(val, mul):
     return mul * math.ceil(val / mul)
 
+
 input_shape = (upscale_to_nearest(1848, 256),
                upscale_to_nearest(195, 256))
 
-def load_data(dir, Is):
-    ims = glob.glob(dir)[:data_size]
-    for d in ims:
-        i = np.array(Image.open(d))
-        i = np.repeat(i[..., np.newaxis], 3, -1)
-        Is.append(tf.image.resize(np.array(i), (input_shape)))
 
 test_data_dir = os.path.join(os.path.dirname(__file__), '../data/extracted_data/test/*/*.tiff')
-test_Is = []
-load_data(test_data_dir, test_Is)
-test_Is = np.array(test_Is)
+
+
+class ProgressiveLoader(list):
+    def __init__(self, data_root, slice=10):
+        self.im_root = data_root
+        self.set_slice = slice
+        self.data_set = glob.glob(self.im_root)
+        self.current_pos = 0
+
+    def load_next_set(self):
+        ims = []
+        old_pos = self.current_pos
+        self.current_pos += self.set_slice
+        for d in self.data_set[old_pos:self.current_pos]:
+            i = np.array(Image.open(d))
+            i = np.repeat(i[..., np.newaxis], 3, -1)
+            ims.append(tf.image.resize(np.array(i), input_shape))
+        return np.array(ims)
+
+
+test_Is = ProgressiveLoader(test_data_dir, slice=data_slice)
+test_Is_ims = test_Is.load_next_set()
 
 # val_data_dir = os.path.join(os.path.dirname(__file__), '../data/extracted_data/val/*/*.tiff')
 # val_Is = []
@@ -52,17 +66,17 @@ lossModel = keras.applications.vgg16.VGG16(weights=None, include_top=False, inpu
 for layer in lossModel.layers:
     layer.trainable=False
 
-
 selectedlayers = [3, 6, 10]
-
 layers_loss_model = Model(lossModel.inputs, [lossModel.layers[idx].output for idx in selectedlayers] +
                                             [gram_matrix(lossModel.layers[idx].output) for idx in selectedlayers])
-
 lossModel.layers[1].output
 
-validation_perceptual_Is = layers_loss_model.predict(test_Is) + [test_Is]
-
+validation_perceptual_Is = layers_loss_model.predict(test_Is_ims) + [test_Is_ims]
 loss_model_outputs = layers_loss_model(model.output)
+
+# cleanup what we can
+del test_Is_ims
+gc.collect()
 
 
 full_model = Model(model.input, loss_model_outputs + model.outputs)
@@ -89,24 +103,23 @@ def generate_mask(input_size: Tuple[int, int]):
     mask[rg2, :, :] = 0
     mask[rg3, :, :] = 0
     mask[rg4, :, :] = 0
-    return np.array([mask] * data_size)
+    return np.array([mask] * data_slice)
 
 Is_data_dir = os.path.join(os.path.dirname(__file__), '../data/extracted_data/train/*/*.tiff')
-import sys
-import gc
+Is_set = ProgressiveLoader(Is_data_dir, slice=data_slice)
+
 def trainer():
     gc.collect()
     mask = generate_mask(input_shape)
-
-    Is = []
-    load_data(Is_data_dir, Is)
-    Is = np.array(Is)
-
-    sample = Is
+    Is = Is_set.load_next_set()
+    sample1 = Is
+    sample2 = Is
+    del Is
+    gc.collect()
     try:
         perceptual_Is = layers_loss_model.predict(sample) + [sample]
 
-        loss.append(full_model.fit([sample, mask], perceptual_Is, epochs=1,
+        loss.append(full_model.fit([sample1, mask], perceptual_Is, epochs=1,
                                    batch_size=8,
                                    )
                    )
@@ -114,20 +127,21 @@ def trainer():
     finally:
         print(sys.getrefcount(perceptual_Is[0]))
         del perceptual_Is
+        del sample
         gc.collect()
 
-    sample = Is
     try:
 
-        perceptual_Is = layers_loss_model.predict(sample) + [sample]
-        loss.append(full_model.fit([sample, mask], perceptual_Is, epochs=1,
+        perceptual_Is = layers_loss_model.predict(sample2) + [sample2]
+        loss.append(full_model.fit([sample2, mask], perceptual_Is, epochs=1,
                                    batch_size=8,
-                                   validation_data=([test_Is, mask[:data_size]],
+                                   validation_data=([test_Is, mask[:data_slice]],
                                                      validation_perceptual_Is))
                    )
 
     finally:
         del perceptual_Is
+        del sample
         gc.collect()
         model.save("best_inpainter")
 
