@@ -143,7 +143,7 @@ def trainer():
 
 import gc
 perceptual_Is = []
-for _ in range(30):
+for _ in range(100):
     trainer()
 model.save("best_inpainter")
 
