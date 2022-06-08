@@ -117,7 +117,7 @@ def trainer():
     del Is
     gc.collect()
     try:
-        perceptual_Is = layers_loss_model.predict(sample) + [sample]
+        perceptual_Is = layers_loss_model.predict(sample1) + [sample1]
 
         loss.append(full_model.fit([sample1, mask], perceptual_Is, epochs=1,
                                    batch_size=8,
