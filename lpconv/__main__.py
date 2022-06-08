@@ -45,7 +45,7 @@ class ProgressiveLoader(object):
         for d in self.data_set[old_pos:self.current_pos]:
             i = np.array(Image.open(d))
             i = np.repeat(i[..., np.newaxis], 3, -1)
-            ims.append(tf.image.resize(np.array(i), input_shape))
+            ims.append(tf.image.resize_with_pad(np.array(i), input_shape))
         return np.array(ims)
 
 
