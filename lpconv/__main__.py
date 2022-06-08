@@ -123,22 +123,18 @@ def trainer():
                                    batch_size=8,
                                    )
                    )
-
     finally:
         print(sys.getrefcount(perceptual_Is[0]))
         del perceptual_Is
         del sample1
         gc.collect()
-
     try:
-
         perceptual_Is = layers_loss_model.predict(sample2) + [sample2]
         loss.append(full_model.fit([sample2, mask], perceptual_Is, epochs=1,
                                    batch_size=8,
-                                   validation_data=([test_Is, mask[:data_slice]],
+                                   validation_data=([test_Is, mask],
                                                      validation_perceptual_Is))
                    )
-
     finally:
         del perceptual_Is
         del sample2
