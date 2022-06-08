@@ -148,6 +148,11 @@ if sys.argv[1] == 'train':
     for _ in range(500):
         trainer()
     model.save("best_inpainter")
+elif sys.argv[1] == 'resume':
+    model = tf.keras.models.load_model("best_inpainter")
+    for _ in range(500):
+        trainer()
+    model.save("best_inpainting")
 else:
     model = tf.keras.models.load_model("best_inpainter")
     eval_im = ProgressiveLoader(val_data_dir, slice=1)
