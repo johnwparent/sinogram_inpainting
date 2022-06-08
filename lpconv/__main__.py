@@ -127,7 +127,7 @@ def trainer():
     finally:
         print(sys.getrefcount(perceptual_Is[0]))
         del perceptual_Is
-        del sample
+        del sample1
         gc.collect()
 
     try:
@@ -141,7 +141,7 @@ def trainer():
 
     finally:
         del perceptual_Is
-        del sample
+        del sample2
         gc.collect()
         model.save("best_inpainter")
 
