@@ -24,8 +24,9 @@ def upscale_to_nearest(val, mul):
     return mul * math.ceil(val / mul)
 
 
-input_shape = (upscale_to_nearest(1848, 256),
-               upscale_to_nearest(195, 256))
+input_shape = (upscale_to_nearest(195, 256),
+               upscale_to_nearest(1848, 256)
+            )
 
 
 test_data_dir = os.path.join(os.path.dirname(__file__), '../data/extracted_data/test/*/*.tiff')
@@ -45,7 +46,7 @@ class ProgressiveLoader(object):
         for d in self.data_set[old_pos:self.current_pos]:
             i = np.array(Image.open(d))
             i = np.repeat(i[..., np.newaxis], 3, -1)
-            ims.append(tf.image.resize_with_pad(np.array(i), input_shape))
+            ims.append(tf.image.resize_with_pad(np.array(i), target_height=input_shape[0], target_width=input_shape[1]))
         return np.array(ims)
 
 
