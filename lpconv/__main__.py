@@ -81,7 +81,7 @@ gc.collect()
 
 
 full_model = Model(model.input, loss_model_outputs + model.outputs)
-full_model.compile(keras.optimizers.Adam(), ['mean_absolute_error'] * 7, loss_weights=[.05, .05, .05, 120, 120, 120, 9])
+full_model.compile(keras.optimizers.Adam(), ['mean_absolute_error'] * 7, loss_weights=[.0, .00, .00, 0, 0, 0, 1])
 
 
 def generate_mask(input_size: Tuple[int, int]):
@@ -155,6 +155,7 @@ elif sys.argv[1] == 'resume':
     model.save("best_inpainting")
 else:
     model = tf.keras.models.load_model("best_inpainter")
+    model.compile()
     eval_im = ProgressiveLoader(val_data_dir, slice=1)
     ret = model.predict([eval_im.load_next_set(), generate_mask(input_shape)])
     import pdb; pdb.set_trace()
