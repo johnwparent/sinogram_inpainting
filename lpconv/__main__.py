@@ -113,8 +113,8 @@ def trainer():
     gc.collect()
     mask = generate_mask(input_shape)
     Is = Is_set.load_next_set()
-    sample1 = Is
-    sample2 = Is
+    sample1 = (Is - np.min(Is)) / (np.max(Is) - np.min(Is))
+    sample2 = (Is - np.min(Is)) / (np.max(Is) - np.min(Is))
     del Is
     gc.collect()
     try:
