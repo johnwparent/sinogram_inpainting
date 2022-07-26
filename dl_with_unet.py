@@ -140,7 +140,7 @@ def load_model(path=BEST_MODEL_PATH):
     Get a model trained on our data from disk
     '''
     model = get_model()
-    model.load_state_dict(torch.load(str(path)))
+    model.load_state_dict(torch.load(str(path), map_location=torch.device('cpu')))
     return model
 
 

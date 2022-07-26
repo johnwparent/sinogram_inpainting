@@ -18,6 +18,7 @@ torchvision = "*"
 segmentation-models-pytorch = "*"
 monai = "==0.6.0"
 keras = "*"
+itk-rtk = "*"
 
 [dev-packages]
 

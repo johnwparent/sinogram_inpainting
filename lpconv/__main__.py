@@ -23,6 +23,8 @@ data_slice = int(sys.argv[2])
 def upscale_to_nearest(val, mul):
     return mul * math.ceil(val / mul)
 
+def normalize(Is):
+    return (Is - np.min(Is)) / (np.max(Is) - np.min(Is))
 
 input_shape = (upscale_to_nearest(195, 256),
                upscale_to_nearest(1848, 256)
@@ -47,7 +49,7 @@ class ProgressiveLoader(object):
             i = np.array(Image.open(d))
             i = np.repeat(i[..., np.newaxis], 3, -1)
             ims.append(tf.image.pad_to_bounding_box(np.array(i), 0, 0, input_shape[0], input_shape[1]))
-        return np.array(ims)
+        return normalize(np.array(ims))
 
 
 test_Is = ProgressiveLoader(test_data_dir, slice=data_slice)
@@ -81,7 +83,7 @@ gc.collect()
 
 
 full_model = Model(model.input, loss_model_outputs + model.outputs)
-full_model.compile(keras.optimizers.Adam(), ['mean_absolute_error'] * 7, loss_weights=[.0, .00, .00, 0, 0, 0, 1])
+full_model.compile(keras.optimizers.Adam(), ['mean_absolute_error'] * 7, loss_weights=[0, 0, 0, 0, 0, 0, 1])
 
 
 def generate_mask(input_size: Tuple[int, int]):
@@ -113,8 +115,8 @@ def trainer():
     gc.collect()
     mask = generate_mask(input_shape)
     Is = Is_set.load_next_set()
-    sample1 = (Is - np.min(Is)) / (np.max(Is) - np.min(Is))
-    sample2 = (Is - np.min(Is)) / (np.max(Is) - np.min(Is))
+    sample1 = Is
+    sample2 = Is
     del Is
     gc.collect()
     try:

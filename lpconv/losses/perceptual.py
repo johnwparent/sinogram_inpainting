@@ -16,9 +16,12 @@ def gram_matrix(input_):
     return output
 
 
+
+
+
 def vggperceptual(model, dim, depth, val_sample):
     lossModel = keras.applications.vgg16.VGG16(include_top=False,
-                                               weights='imagenet',
+                                               weights=None,
                                                input_shape=(dim, dim, depth))
 
     for layer in lossModel.layers:
